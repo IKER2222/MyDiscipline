@@ -459,7 +459,7 @@ function renderDashboard(container) {
           <div class="stat-card__label">Racha Días</div>
         </div>
         <div class="stat-card neu-raised-sm">
-          <div class="stat-card__icon" style="color:var(--accent-cyan)">${icon('trophy', { size: 22 })}</div>
+          <div class="stat-card__icon" style="color:var(--accent-silver)">${icon('trophy', { size: 22 })}</div>
           <div class="stat-card__value">${longestStreak}</div>
           <div class="stat-card__label">Mejor Racha</div>
         </div>
@@ -1008,7 +1008,7 @@ function showNoteModal(editNote = null) {
   const existing = document.querySelector('.modal-backdrop');
   if (existing) existing.remove();
 
-  const noteColors = ['#38bdf8', '#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+  const noteColors = ['#e2e8f0', '#94a3b8', '#64748b', '#10b981', '#eab308', '#ef4444'];
   const categories = ['Ideas', 'Tareas', 'Reflexiones', 'Estrategia'];
 
   const backdrop = document.createElement('div');
@@ -1058,7 +1058,7 @@ function showNoteModal(editNote = null) {
 
   document.body.appendChild(backdrop);
 
-  let selectedColor = editNote?.color || '#38bdf8';
+  let selectedColor = editNote?.color || '#e2e8f0';
 
   backdrop.querySelectorAll('[data-color]').forEach((el) => {
     el.addEventListener('click', () => {
