@@ -4,8 +4,13 @@ import { createClient } from '@supabase/supabase-js';
 // The user must set these in a .env file at the project root:
 //   VITE_SUPABASE_URL=https://your-project.supabase.co
 //   VITE_SUPABASE_ANON_KEY=your-anon-key
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+let supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+// Ensure clean base URL without trailing slash or /rest/v1
+if (supabaseUrl) {
+  supabaseUrl = supabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+}
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error(
