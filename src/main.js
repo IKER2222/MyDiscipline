@@ -1,13 +1,44 @@
 // ═══════════════════════════════════════════════════════════
-// MyDiscipline — Main Application
+// MyDiscipline — Winter Arc Application
+// Full Neumorphic Productivity Engine with Dark/Light Themes
 // ═══════════════════════════════════════════════════════════
 
 import './style.css';
 import { supabase } from './supabaseClient.js';
 import { showToast } from './toast.js';
 import { getDailyQuote } from './quotes.js';
+import { icon, ICONS, WINTER_ARC_PRESETS } from './icons.js';
 
-// ─── State ───
+// ─── Theme State ───
+let currentTheme = localStorage.getItem('mydiscipline_theme') || 'dark';
+
+function applyTheme(theme) {
+  currentTheme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('mydiscipline_theme', theme);
+}
+
+function toggleTheme() {
+  const next = currentTheme === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  renderPage();
+  updateThemeButtons();
+}
+
+function updateThemeButtons() {
+  document.querySelectorAll('.theme-toggle-btn').forEach((btn) => {
+    const isDark = currentTheme === 'dark';
+    btn.innerHTML = `
+      <span class="theme-toggle-icon">${icon(isDark ? 'sun' : 'moon', { size: 16 })}</span>
+      <span>${isDark ? 'Modo Claro' : 'Modo Oscuro'}</span>
+    `;
+  });
+}
+
+// Initial theme setup
+applyTheme(currentTheme);
+
+// ─── App State ───
 let currentUser = null;
 let currentPage = 'dashboard';
 let sidebarOpen = false;
@@ -81,16 +112,27 @@ function getLast90Days() {
   return days;
 }
 
-// ─── Auth ───
+// ─── Auth View ───
 function renderAuth() {
   const app = document.getElementById('app');
+  const isDark = currentTheme === 'dark';
+
   app.innerHTML = `
     <div class="auth-wrapper">
+      <div class="auth-theme-toggle">
+        <button class="theme-toggle-btn" id="auth-theme-btn" aria-label="Cambiar tema">
+          <span class="theme-toggle-icon">${icon(isDark ? 'sun' : 'moon', { size: 16 })}</span>
+          <span>${isDark ? 'Modo Claro' : 'Modo Oscuro'}</span>
+        </button>
+      </div>
+
       <div class="auth-card neu-raised-lg slide-up">
         <div class="auth-card__logo">
-          <div class="auth-card__logo-icon">🎯</div>
+          <div class="auth-card__logo-icon">
+            ${icon('snowflake', { size: 36, strokeWidth: 2.2 })}
+          </div>
           <h1 class="auth-card__title">MyDiscipline</h1>
-          <p class="auth-card__subtitle">Tu sistema de disciplina y rendimiento personal</p>
+          <p class="auth-card__subtitle">Winter Arc — Rendimiento & Maestría Personal</p>
         </div>
         <div id="auth-error"></div>
         <form id="auth-form">
@@ -113,6 +155,8 @@ function renderAuth() {
       </div>
     </div>
   `;
+
+  document.getElementById('auth-theme-btn').addEventListener('click', toggleTheme);
 
   let isLogin = true;
   const form = document.getElementById('auth-form');
@@ -157,9 +201,9 @@ function renderAuth() {
       }
 
       if (isLogin) {
-        showToast('¡Bienvenido de vuelta! 💪', 'success');
+        showToast('¡Bienvenido al Winter Arc!', 'success');
       } else {
-        showToast('¡Cuenta creada! Revisa tu correo para confirmar.', 'success', 5000);
+        showToast('¡Cuenta creada! Revisa tu correo si requiere confirmación.', 'success', 5000);
       }
     } catch (err) {
       const messages = {
@@ -180,48 +224,65 @@ function renderAppShell() {
   const app = document.getElementById('app');
   const userEmail = currentUser.email || '';
   const initials = userEmail.substring(0, 2).toUpperCase();
+  const isDark = currentTheme === 'dark';
 
   app.innerHTML = `
-    <button class="mobile-toggle neu-btn neu-btn--icon" id="mobile-toggle" aria-label="Abrir menú">☰</button>
+    <button class="mobile-toggle neu-btn neu-btn--icon" id="mobile-toggle" aria-label="Abrir menú">
+      ${icon('menu', { size: 20 })}
+    </button>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__brand">
-          <div class="sidebar__brand-icon">🎯</div>
+          <div class="sidebar__brand-icon">
+            ${icon('snowflake', { size: 22, strokeWidth: 2.2 })}
+          </div>
           <span class="sidebar__brand-text">MyDiscipline</span>
         </div>
+
         <nav class="sidebar__nav">
           <div class="sidebar__link sidebar__link--active" data-page="dashboard">
-            <span class="sidebar__link-icon">📊</span> Dashboard
+            <span class="sidebar__link-icon">${icon('target', { size: 19 })}</span> Dashboard
           </div>
           <div class="sidebar__link" data-page="habits">
-            <span class="sidebar__link-icon">✅</span> Hábitos
+            <span class="sidebar__link-icon">${icon('snowflake', { size: 19 })}</span> Hábitos Arc
           </div>
           <div class="sidebar__link" data-page="notes">
-            <span class="sidebar__link-icon">📝</span> Notas
+            <span class="sidebar__link-icon">${icon('book', { size: 19 })}</span> Notas & Diario
           </div>
           <div class="sidebar__link" data-page="pomodoro">
-            <span class="sidebar__link-icon">🍅</span> Pomodoro
+            <span class="sidebar__link-icon">${icon('timer', { size: 19 })}</span> Deep Work
           </div>
           <div class="sidebar__link" data-page="mood">
-            <span class="sidebar__link-icon">😊</span> Estado de Ánimo
+            <span class="sidebar__link-icon">${icon('brain', { size: 19 })}</span> Mentalidad
           </div>
         </nav>
-        <div class="sidebar__user">
-          <div class="sidebar__avatar">${initials}</div>
-          <div class="sidebar__user-info">
-            <div class="sidebar__user-name">${userEmail.split('@')[0]}</div>
-            <div class="sidebar__user-email">${userEmail}</div>
+
+        <div class="sidebar__footer">
+          <button class="theme-toggle-btn" id="sidebar-theme-btn" style="width:100%;justify-content:center">
+            <span class="theme-toggle-icon">${icon(isDark ? 'sun' : 'moon', { size: 16 })}</span>
+            <span>${isDark ? 'Modo Claro' : 'Modo Oscuro'}</span>
+          </button>
+
+          <div class="sidebar__user">
+            <div class="sidebar__avatar">${initials}</div>
+            <div class="sidebar__user-info">
+              <div class="sidebar__user-name">${userEmail.split('@')[0]}</div>
+              <div class="sidebar__user-email">${userEmail}</div>
+            </div>
+            <button class="neu-btn neu-btn--icon-sm" id="logout-btn" aria-label="Cerrar sesión" title="Cerrar sesión">
+              ${icon('logout', { size: 16 })}
+            </button>
           </div>
-          <button class="neu-btn neu-btn--icon-sm" id="logout-btn" aria-label="Cerrar sesión" title="Cerrar sesión">⏻</button>
         </div>
       </aside>
+
       <main class="main-content" id="main-content">
-        <!-- Page content rendered here -->
+        <!-- Dynamic Page content -->
       </main>
     </div>
   `;
 
-  // Nav
+  // Nav links
   document.querySelectorAll('.sidebar__link').forEach((link) => {
     link.addEventListener('click', () => {
       currentPage = link.dataset.page;
@@ -231,6 +292,9 @@ function renderAppShell() {
       closeSidebar();
     });
   });
+
+  // Theme toggle
+  document.getElementById('sidebar-theme-btn').addEventListener('click', toggleTheme);
 
   // Logout
   document.getElementById('logout-btn').addEventListener('click', async () => {
@@ -244,7 +308,6 @@ function renderAppShell() {
     document.getElementById('sidebar').classList.toggle('sidebar--open', sidebarOpen);
   });
 
-  // Close sidebar on main content click (mobile)
   document.getElementById('main-content').addEventListener('click', closeSidebar);
 
   loadAllData();
@@ -331,31 +394,41 @@ function renderDashboard(container) {
   const totalHabits = habits.length;
   const todayPercent = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
 
-  // Calculate streaks
   const longestStreak = calculateLongestStreak();
   const currentStreak = calculateCurrentStreak();
-
-  // Quote of the day
   const quote = getDailyQuote();
-
-  // Today's mood
   const todayMood = moods.find((m) => m.date === todayStr());
-  const moodEmojis = { great: '😄', good: '🙂', neutral: '😐', bad: '😟', awful: '😢' };
 
   const weekDays = getWeekDays();
   const today = new Date();
+  const isDark = currentTheme === 'dark';
 
   container.innerHTML = `
     <div class="tab-content">
-      <div class="page-header">
-        <h1 class="page-header__title">¡Buenos días, ${currentUser.email.split('@')[0]}! 👋</h1>
-        <p class="page-header__subtitle">${today.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+      <div class="top-header">
+        <div>
+          <h1 class="page-header__title">
+            ${icon('snowflake', { size: 28 })} Winter Arc Dashboard
+          </h1>
+          <p class="page-header__subtitle">
+            ${today.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--space-sm)">
+          <div class="winter-arc-badge">
+            ${icon('zap', { size: 14 })} Q4 Discipline
+          </div>
+          <button class="theme-toggle-btn" id="header-theme-btn" aria-label="Cambiar tema">
+            <span class="theme-toggle-icon">${icon(isDark ? 'sun' : 'moon', { size: 16 })}</span>
+            <span>${isDark ? 'Modo Claro' : 'Modo Oscuro'}</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Quote -->
+      <!-- Stoic Quote -->
       <div class="neu-card quote-card" style="margin-bottom: var(--space-lg)">
         <p class="quote-card__text">"${quote.text}"</p>
-        <p class="quote-card__author">— ${quote.author}</p>
+        <p class="quote-card__author">${icon('shield', { size: 14 })} ${quote.author}</p>
       </div>
 
       <!-- Week Row -->
@@ -376,51 +449,63 @@ function renderDashboard(container) {
       <!-- Stats -->
       <div class="dashboard-grid dashboard-grid--stats" style="margin-bottom: var(--space-lg)">
         <div class="stat-card neu-raised-sm">
-          <div class="stat-card__icon">🎯</div>
+          <div class="stat-card__icon">${icon('target', { size: 22 })}</div>
           <div class="stat-card__value">${todayPercent}%</div>
           <div class="stat-card__label">Progreso Hoy</div>
         </div>
         <div class="stat-card neu-raised-sm">
-          <div class="stat-card__icon">🔥</div>
+          <div class="stat-card__icon" style="color:var(--accent-warning)">${icon('flame', { size: 22 })}</div>
           <div class="stat-card__value">${currentStreak}</div>
-          <div class="stat-card__label">Racha Actual</div>
+          <div class="stat-card__label">Racha Días</div>
         </div>
         <div class="stat-card neu-raised-sm">
-          <div class="stat-card__icon">🏆</div>
+          <div class="stat-card__icon" style="color:var(--accent-cyan)">${icon('trophy', { size: 22 })}</div>
           <div class="stat-card__value">${longestStreak}</div>
           <div class="stat-card__label">Mejor Racha</div>
         </div>
         <div class="stat-card neu-raised-sm">
-          <div class="stat-card__icon">${todayMood ? moodEmojis[todayMood.mood] || '😊' : '❓'}</div>
-          <div class="stat-card__value">${todayMood ? todayMood.mood.charAt(0).toUpperCase() + todayMood.mood.slice(1) : '—'}</div>
-          <div class="stat-card__label">Ánimo Hoy</div>
+          <div class="stat-card__icon" style="color:var(--accent-success)">${icon('brain', { size: 22 })}</div>
+          <div class="stat-card__value">${todayMood ? todayMood.mood.toUpperCase() : '—'}</div>
+          <div class="stat-card__label">Fuerza Mental</div>
         </div>
       </div>
 
-      <!-- Dashboard Grid -->
+      <!-- Main Dashboard Grid -->
       <div class="dashboard-grid">
         <!-- Today's Habits -->
         <div class="neu-card">
           <div class="neu-card__header">
-            <h2 class="neu-card__title">✅ Hábitos de Hoy</h2>
-            <span class="neu-badge ${todayPercent === 100 ? 'neu-badge--success' : todayPercent >= 50 ? 'neu-badge--warning' : 'neu-badge--danger'}">${completedToday}/${totalHabits}</span>
+            <h2 class="neu-card__title">
+              ${icon('snowflake', { size: 20 })} Hábitos Activos
+            </h2>
+            <span class="neu-badge ${todayPercent === 100 ? 'neu-badge--success' : todayPercent >= 50 ? 'neu-badge--info' : 'neu-badge--warning'}">
+              ${completedToday}/${totalHabits}
+            </span>
           </div>
           <div class="neu-progress" style="margin-bottom: var(--space-md)">
             <div class="neu-progress__fill ${todayPercent === 100 ? 'neu-progress__fill--success' : ''}" style="width: ${todayPercent}%"></div>
           </div>
           ${habits.length === 0
-            ? '<div class="empty-state"><div class="empty-state__icon">🌱</div><div class="empty-state__text">Crea tu primer hábito</div></div>'
+            ? `<div class="empty-state">
+                <div class="empty-state__icon">${icon('snowflake', { size: 30 })}</div>
+                <div class="empty-state__text">Aún no has configurado tus hábitos</div>
+                <div class="empty-state__hint">Añade rutinas del Winter Arc para forjar disciplina</div>
+              </div>`
             : habits
-                .slice(0, 5)
+                .slice(0, 6)
                 .map((h) => {
                   const done = todayLogs.some((l) => l.habit_id === h.id);
+                  const iconName = h.icon && ICONS[h.icon] ? h.icon : 'snowflake';
                   return `
                   <div class="habit-item neu-raised-sm" style="margin-bottom: var(--space-sm)">
                     <div class="habit-item__check ${done ? 'habit-item__check--done' : ''}" data-habit-id="${h.id}" data-dash-toggle>
-                      ${done ? '✓' : ''}
+                      ${done ? icon('check', { size: 18, color: '#ffffff' }) : ''}
                     </div>
                     <div class="habit-item__info">
-                      <div class="habit-item__name">${h.icon || '📌'} ${h.name}</div>
+                      <div class="habit-item__name">
+                        <span class="icon-badge">${icon(iconName, { size: 18 })}</span>
+                        ${h.name}
+                      </div>
                     </div>
                   </div>`;
                 })
@@ -430,16 +515,22 @@ function renderDashboard(container) {
         <!-- Recent Notes -->
         <div class="neu-card">
           <div class="neu-card__header">
-            <h2 class="neu-card__title">📝 Notas Recientes</h2>
+            <h2 class="neu-card__title">
+              ${icon('book', { size: 20 })} Diario & Notas Recientes
+            </h2>
           </div>
           ${notes.length === 0
-            ? '<div class="empty-state"><div class="empty-state__icon">📋</div><div class="empty-state__text">Sin notas aún</div></div>'
+            ? `<div class="empty-state">
+                <div class="empty-state__icon">${icon('book', { size: 30 })}</div>
+                <div class="empty-state__text">Sin entradas en el diario</div>
+                <div class="empty-state__hint">Anota reflexiones estoicas o tareas clave</div>
+              </div>`
             : notes
                 .slice(0, 4)
                 .map(
                   (n) => `
                 <div class="note-item neu-raised-sm" style="margin-bottom: var(--space-sm)">
-                  <div class="note-item__color" style="background: ${n.color || '#6c63ff'}"></div>
+                  <div class="note-item__color" style="background: ${n.color || 'var(--accent-primary)'}"></div>
                   <div class="note-item__content">
                     <div class="note-item__title">${n.title}</div>
                     <div class="note-item__text">${n.content || ''}</div>
@@ -453,7 +544,8 @@ function renderDashboard(container) {
     </div>
   `;
 
-  // Dashboard habit toggle
+  document.getElementById('header-theme-btn').addEventListener('click', toggleTheme);
+
   container.querySelectorAll('[data-dash-toggle]').forEach((el) => {
     el.addEventListener('click', () => toggleHabitLog(el.dataset.habitId));
   });
@@ -512,16 +604,39 @@ function renderHabitsPage(container) {
     <div class="tab-content">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-md)">
         <div>
-          <h1 class="page-header__title">Mis Hábitos</h1>
-          <p class="page-header__subtitle">Construye la mejor versión de ti mismo</p>
+          <h1 class="page-header__title">
+            ${icon('snowflake', { size: 28 })} Hábitos del Winter Arc
+          </h1>
+          <p class="page-header__subtitle">Forja una disciplina inquebrantable cada día</p>
         </div>
-        <button class="neu-btn neu-btn--primary" id="add-habit-btn">+ Nuevo Hábito</button>
+        <button class="neu-btn neu-btn--primary" id="add-habit-btn">
+          ${icon('plus', { size: 18 })} Nuevo Hábito
+        </button>
+      </div>
+
+      <!-- Presets Banner -->
+      <div class="neu-card" style="margin-bottom: var(--space-lg)">
+        <div class="neu-card__header" style="margin-bottom: var(--space-sm)">
+          <h2 class="neu-card__title">
+            ${icon('zap', { size: 18 })} Protocolos Populares Winter Arc
+          </h2>
+        </div>
+        <div class="presets-grid">
+          ${WINTER_ARC_PRESETS.slice(0, 6).map(p => `
+            <div class="preset-card" data-preset="${p.id}">
+              <div class="preset-card__icon">${icon(p.icon, { size: 24 })}</div>
+              <div class="preset-card__name">${p.name}</div>
+            </div>
+          `).join('')}
+        </div>
       </div>
 
       <!-- Heatmap -->
       <div class="neu-card" style="margin-bottom: var(--space-lg)">
         <div class="neu-card__header">
-          <h2 class="neu-card__title">🗓️ Actividad (últimos 90 días)</h2>
+          <h2 class="neu-card__title">
+            ${icon('calendar', { size: 20 })} Matriz de Disciplina (90 días)
+          </h2>
         </div>
         <div class="heatmap" id="heatmap">
           ${renderHeatmap(last90)}
@@ -532,27 +647,37 @@ function renderHabitsPage(container) {
       <div class="habits-grid" id="habits-list">
         ${habits.length === 0
           ? `<div class="neu-card empty-state">
-              <div class="empty-state__icon">🌱</div>
-              <div class="empty-state__text">Aún no tienes hábitos</div>
-              <div class="empty-state__hint">Pulsa "+ Nuevo Hábito" para empezar tu transformación</div>
+              <div class="empty-state__icon">${icon('snowflake', { size: 36 })}</div>
+              <div class="empty-state__text">Aún no tienes hábitos registrados</div>
+              <div class="empty-state__hint">Selecciona un protocolo de arriba o crea uno personalizado</div>
             </div>`
           : habits
               .map((h) => {
                 const done = todayLogs.some((l) => l.habit_id === h.id);
                 const streak = getHabitStreak(h.id);
+                const iconName = h.icon && ICONS[h.icon] ? h.icon : 'snowflake';
                 return `
-                <div class="habit-item neu-card" style="padding: var(--space-md) var(--space-lg)">
+                <div class="habit-item neu-card">
                   <div class="habit-item__check ${done ? 'habit-item__check--done' : ''}" data-habit-id="${h.id}">
-                    ${done ? '✓' : ''}
+                    ${done ? icon('check', { size: 20, color: '#ffffff' }) : ''}
                   </div>
                   <div class="habit-item__info">
-                    <div class="habit-item__name">${h.icon || '📌'} ${h.name}</div>
-                    <div class="habit-item__streak">🔥 Racha: ${streak} días</div>
+                    <div class="habit-item__name">
+                      <span class="icon-badge">${icon(iconName, { size: 18 })}</span>
+                      ${h.name}
+                    </div>
+                    <div class="habit-item__streak">
+                      ${icon('flame', { size: 14, color: 'var(--accent-warning)' })} Racha: ${streak} días
+                    </div>
                   </div>
                   <span class="habit-item__frequency neu-badge neu-badge--info">${h.frequency || 'Diario'}</span>
                   <div class="habit-item__actions">
-                    <button class="neu-btn neu-btn--icon-sm" data-edit-habit="${h.id}" title="Editar">✏️</button>
-                    <button class="neu-btn neu-btn--icon-sm" data-delete-habit="${h.id}" title="Eliminar">🗑️</button>
+                    <button class="neu-btn neu-btn--icon-sm" data-edit-habit="${h.id}" title="Editar">
+                      ${icon('edit', { size: 15 })}
+                    </button>
+                    <button class="neu-btn neu-btn--icon-sm" data-delete-habit="${h.id}" title="Eliminar">
+                      ${icon('trash', { size: 15 })}
+                    </button>
                   </div>
                 </div>`;
               })
@@ -560,6 +685,16 @@ function renderHabitsPage(container) {
       </div>
     </div>
   `;
+
+  // Quick Preset Add
+  container.querySelectorAll('[data-preset]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const preset = WINTER_ARC_PRESETS.find(p => p.id === el.dataset.preset);
+      if (preset) {
+        showHabitModal({ name: preset.name, icon: preset.icon, frequency: 'Diario' });
+      }
+    });
+  });
 
   // Toggle habit
   container.querySelectorAll('.habit-item__check[data-habit-id]').forEach((el) => {
@@ -584,7 +719,6 @@ function renderHabitsPage(container) {
 }
 
 function renderHeatmap(days) {
-  // Group by week
   const weeks = [];
   let currentWeek = [];
 
@@ -593,7 +727,6 @@ function renderHeatmap(days) {
     const dow = d.getDay();
 
     if (i === 0 && dow !== 1) {
-      // Pad first week
       for (let j = 0; j < (dow === 0 ? 6 : dow - 1); j++) {
         currentWeek.push(null);
       }
@@ -666,25 +799,32 @@ function showHabitModal(editHabit = null) {
   const existing = document.querySelector('.modal-backdrop');
   if (existing) existing.remove();
 
-  const icons = ['🏃', '📖', '💧', '🧘', '💪', '🎯', '📝', '🌅', '🥗', '😴', '🧠', '🎵', '💻', '🌿', '⏰'];
+  const selectableIcons = [
+    'snowflake', 'dumbbell', 'zap', 'brain', 'book', 'droplet',
+    'mountain', 'shield', 'flame', 'target', 'sunrise', 'lock', 'swords', 'trophy'
+  ];
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
     <div class="modal-content">
-      <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:var(--space-lg)">${editHabit ? 'Editar Hábito' : 'Nuevo Hábito'}</h2>
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-lg);display:flex;align-items:center;gap:8px">
+        ${icon('snowflake', { size: 22 })} ${editHabit ? 'Editar Hábito' : 'Nuevo Hábito Winter Arc'}
+      </h2>
       <form id="habit-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
         <div class="neu-input-wrapper">
           <label for="habit-name">Nombre del Hábito</label>
-          <input type="text" id="habit-name" class="neu-input" placeholder="Ej: Leer 20 minutos" required value="${editHabit?.name || ''}" />
+          <input type="text" id="habit-name" class="neu-input" placeholder="Ej: Ducha Fría 3 Min" required value="${editHabit?.name || ''}" />
         </div>
         <div class="neu-input-wrapper">
-          <label>Icono</label>
-          <div class="chip-group" id="icon-selector">
-            ${icons
+          <label>Icono Winter Arc</label>
+          <div class="chip-group" id="icon-selector" style="gap:8px">
+            ${selectableIcons
               .map(
-                (icon) =>
-                  `<span class="chip ${editHabit?.icon === icon ? 'chip--active' : ''}" data-icon="${icon}">${icon}</span>`
+                (ic) =>
+                  `<span class="chip ${editHabit?.icon === ic ? 'chip--active' : (!editHabit && ic === 'snowflake') ? 'chip--active' : ''}" data-icon="${ic}" style="display:inline-flex;align-items:center;gap:6px">
+                    ${icon(ic, { size: 16 })} ${ic}
+                  </span>`
               )
               .join('')}
           </div>
@@ -692,7 +832,7 @@ function showHabitModal(editHabit = null) {
         <div class="neu-input-wrapper">
           <label for="habit-freq">Frecuencia</label>
           <select id="habit-freq" class="neu-input" style="cursor:pointer">
-            <option value="Diario" ${editHabit?.frequency === 'Diario' ? 'selected' : ''}>Diario</option>
+            <option value="Diario" ${editHabit?.frequency === 'Diario' ? 'selected' : ''}>Diario (Winter Arc)</option>
             <option value="L-V" ${editHabit?.frequency === 'L-V' ? 'selected' : ''}>Lunes a Viernes</option>
             <option value="3x/semana" ${editHabit?.frequency === '3x/semana' ? 'selected' : ''}>3 veces/semana</option>
             <option value="Semanal" ${editHabit?.frequency === 'Semanal' ? 'selected' : ''}>Semanal</option>
@@ -700,7 +840,7 @@ function showHabitModal(editHabit = null) {
         </div>
         <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
           <button type="button" class="neu-btn" id="habit-cancel">Cancelar</button>
-          <button type="submit" class="neu-btn neu-btn--primary">${editHabit ? 'Guardar' : 'Crear'}</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editHabit ? 'Guardar Cambios' : 'Confirmar Hábito'}</button>
         </div>
       </form>
     </div>
@@ -708,7 +848,7 @@ function showHabitModal(editHabit = null) {
 
   document.body.appendChild(backdrop);
 
-  let selectedIcon = editHabit?.icon || '📌';
+  let selectedIcon = editHabit?.icon || 'snowflake';
 
   backdrop.querySelectorAll('[data-icon]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -730,7 +870,7 @@ function showHabitModal(editHabit = null) {
 
     if (!name) return;
 
-    if (editHabit) {
+    if (editHabit && editHabit.id) {
       const { data } = await supabase
         .from('habits')
         .update({ name, icon: selectedIcon, frequency })
@@ -750,7 +890,7 @@ function showHabitModal(editHabit = null) {
         .single();
       if (data) {
         habits.push(data);
-        showToast('¡Nuevo hábito creado! 🎉', 'success');
+        showToast('¡Hábito añadido al Winter Arc! ❄️', 'success');
       }
     }
 
@@ -760,7 +900,7 @@ function showHabitModal(editHabit = null) {
 }
 
 async function deleteHabit(id) {
-  if (!confirm('¿Eliminar este hábito y todo su historial?')) return;
+  if (!confirm('¿Eliminar este hábito y su historial?')) return;
 
   await supabase.from('habit_logs').delete().eq('habit_id', id);
   await supabase.from('habits').delete().eq('id', id);
@@ -772,17 +912,20 @@ async function deleteHabit(id) {
 
 // ─── NOTES PAGE ───
 function renderNotesPage(container) {
-  const noteColors = ['#6c63ff', '#2ed573', '#ffa502', '#ff4757', '#1e90ff', '#a29bfe'];
-  const categories = ['Todas', 'Ideas', 'Tareas', 'Reflexiones'];
+  const categories = ['Todas', 'Ideas', 'Tareas', 'Reflexiones', 'Estrategia'];
 
   container.innerHTML = `
     <div class="tab-content">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-md)">
         <div>
-          <h1 class="page-header__title">Notas & Ideas</h1>
-          <p class="page-header__subtitle">Captura tus pensamientos y tareas pendientes</p>
+          <h1 class="page-header__title">
+            ${icon('book', { size: 28 })} Notas & Diario Estoico
+          </h1>
+          <p class="page-header__subtitle">Captura tus reflexiones, lecciones y tareas pendientes</p>
         </div>
-        <button class="neu-btn neu-btn--primary" id="add-note-btn">+ Nueva Nota</button>
+        <button class="neu-btn neu-btn--primary" id="add-note-btn">
+          ${icon('plus', { size: 18 })} Nueva Nota
+        </button>
       </div>
 
       <!-- Filter Chips -->
@@ -799,15 +942,15 @@ function renderNotesPage(container) {
       <div class="notes-list" id="notes-list">
         ${notes.length === 0
           ? `<div class="neu-card empty-state">
-              <div class="empty-state__icon">💡</div>
+              <div class="empty-state__icon">${icon('book', { size: 36 })}</div>
               <div class="empty-state__text">Sin notas aún</div>
-              <div class="empty-state__hint">Captura ideas, listas de tareas o reflexiones</div>
+              <div class="empty-state__hint">Registra planes de entrenamiento, reflexiones o metas</div>
             </div>`
           : notes
               .map(
                 (n) => `
                 <div class="note-item neu-card" data-note-category="${n.category || 'Todas'}">
-                  <div class="note-item__color" style="background: ${n.color || '#6c63ff'}"></div>
+                  <div class="note-item__color" style="background: ${n.color || 'var(--accent-primary)'}"></div>
                   <div class="note-item__content">
                     <div class="note-item__title">${n.title}</div>
                     <div class="note-item__text">${(n.content || '').replace(/\n/g, '<br>')}</div>
@@ -817,8 +960,12 @@ function renderNotesPage(container) {
                     </div>
                   </div>
                   <div class="note-item__actions">
-                    <button class="neu-btn neu-btn--icon-sm" data-edit-note="${n.id}" title="Editar">✏️</button>
-                    <button class="neu-btn neu-btn--icon-sm" data-delete-note="${n.id}" title="Eliminar">🗑️</button>
+                    <button class="neu-btn neu-btn--icon-sm" data-edit-note="${n.id}" title="Editar">
+                      ${icon('edit', { size: 15 })}
+                    </button>
+                    <button class="neu-btn neu-btn--icon-sm" data-delete-note="${n.id}" title="Eliminar">
+                      ${icon('trash', { size: 15 })}
+                    </button>
                   </div>
                 </div>`
               )
@@ -861,22 +1008,24 @@ function showNoteModal(editNote = null) {
   const existing = document.querySelector('.modal-backdrop');
   if (existing) existing.remove();
 
-  const noteColors = ['#6c63ff', '#2ed573', '#ffa502', '#ff4757', '#1e90ff', '#a29bfe'];
-  const categories = ['Ideas', 'Tareas', 'Reflexiones'];
+  const noteColors = ['#38bdf8', '#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+  const categories = ['Ideas', 'Tareas', 'Reflexiones', 'Estrategia'];
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
     <div class="modal-content">
-      <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:var(--space-lg)">${editNote ? 'Editar Nota' : 'Nueva Nota'}</h2>
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-lg);display:flex;align-items:center;gap:8px">
+        ${icon('book', { size: 22 })} ${editNote ? 'Editar Nota' : 'Nueva Nota / Reflexión'}
+      </h2>
       <form id="note-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
         <div class="neu-input-wrapper">
           <label for="note-title">Título</label>
-          <input type="text" id="note-title" class="neu-input" placeholder="Título de la nota" required value="${editNote?.title || ''}" />
+          <input type="text" id="note-title" class="neu-input" placeholder="Título o idea principal" required value="${editNote?.title || ''}" />
         </div>
         <div class="neu-input-wrapper">
           <label for="note-content">Contenido</label>
-          <textarea id="note-content" class="neu-textarea" placeholder="Escribe aquí tus ideas...">${editNote?.content || ''}</textarea>
+          <textarea id="note-content" class="neu-textarea" placeholder="Escribe aquí tus pensamientos o plan de acción...">${editNote?.content || ''}</textarea>
         </div>
         <div class="neu-input-wrapper">
           <label for="note-category">Categoría</label>
@@ -889,7 +1038,7 @@ function showNoteModal(editNote = null) {
           </select>
         </div>
         <div class="neu-input-wrapper">
-          <label>Color</label>
+          <label>Color de Resalte</label>
           <div class="note-colors">
             ${noteColors
               .map(
@@ -901,7 +1050,7 @@ function showNoteModal(editNote = null) {
         </div>
         <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
           <button type="button" class="neu-btn" id="note-cancel">Cancelar</button>
-          <button type="submit" class="neu-btn neu-btn--primary">${editNote ? 'Guardar' : 'Crear'}</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editNote ? 'Guardar' : 'Crear Nota'}</button>
         </div>
       </form>
     </div>
@@ -909,7 +1058,7 @@ function showNoteModal(editNote = null) {
 
   document.body.appendChild(backdrop);
 
-  let selectedColor = editNote?.color || '#6c63ff';
+  let selectedColor = editNote?.color || '#38bdf8';
 
   backdrop.querySelectorAll('[data-color]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -959,7 +1108,7 @@ function showNoteModal(editNote = null) {
         .single();
       if (data) {
         notes.unshift(data);
-        showToast('Nota creada ✏️', 'success');
+        showToast('Nota creada con éxito', 'success');
       }
     }
 
@@ -983,31 +1132,43 @@ function renderPomodoroPage(container) {
     .padStart(2, '0');
   const seconds = (pomodoroSeconds % 60).toString().padStart(2, '0');
 
-  const modeLabels = { focus: 'Enfoque', short: 'Descanso Corto', long: 'Descanso Largo' };
+  const modeLabels = { focus: 'Deep Work (Enfoque)', short: 'Descanso Breve', long: 'Descanso Largo' };
 
   container.innerHTML = `
     <div class="tab-content">
       <div class="page-header" style="text-align:center">
-        <h1 class="page-header__title">🍅 Pomodoro Timer</h1>
-        <p class="page-header__subtitle">Concéntrate y sé productivo</p>
+        <h1 class="page-header__title" style="justify-content:center">
+          ${icon('timer', { size: 30 })} Deep Work Timer
+        </h1>
+        <p class="page-header__subtitle">Bloques de enfoque implacable para el Winter Arc</p>
       </div>
 
-      <div class="neu-card pomodoro" style="max-width:500px;margin:0 auto">
+      <div class="neu-card pomodoro" style="max-width:540px;margin:0 auto">
         <div class="pomodoro__tabs">
-          <span class="pomodoro__tab ${pomodoroMode === 'focus' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="focus">Enfoque</span>
-          <span class="pomodoro__tab ${pomodoroMode === 'short' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="short">Corto</span>
-          <span class="pomodoro__tab ${pomodoroMode === 'long' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="long">Largo</span>
+          <span class="pomodoro__tab ${pomodoroMode === 'focus' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="focus">
+            ${icon('zap', { size: 14 })} 25m Enfoque
+          </span>
+          <span class="pomodoro__tab ${pomodoroMode === 'short' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="short">
+            5m Corto
+          </span>
+          <span class="pomodoro__tab ${pomodoroMode === 'long' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="long">
+            15m Largo
+          </span>
         </div>
 
         <div class="pomodoro__label">${modeLabels[pomodoroMode]}</div>
         <div class="pomodoro__display" id="pomo-display">${minutes}:${seconds}</div>
 
         <div class="pomodoro__controls">
-          <button class="neu-btn neu-btn--icon" id="pomo-reset" title="Reiniciar">↺</button>
-          <button class="neu-btn ${pomodoroRunning ? 'neu-btn--danger' : 'neu-btn--primary'} neu-btn--lg" id="pomo-toggle">
-            ${pomodoroRunning ? '⏸ Pausar' : '▶ Iniciar'}
+          <button class="neu-btn neu-btn--icon" id="pomo-reset" title="Reiniciar">
+            ${icon('rotate', { size: 18 })}
           </button>
-          <button class="neu-btn neu-btn--icon" id="pomo-skip" title="Saltar">⏭</button>
+          <button class="neu-btn ${pomodoroRunning ? 'neu-btn--danger' : 'neu-btn--primary'} neu-btn--lg" id="pomo-toggle">
+            ${pomodoroRunning ? icon('pause', { size: 18 }) + ' Pausar' : icon('play', { size: 18 }) + ' Iniciar Sesión'}
+          </button>
+          <button class="neu-btn neu-btn--icon" id="pomo-skip" title="Saltar">
+            ${icon('skip', { size: 18 })}
+          </button>
         </div>
 
         <div class="pomodoro__sessions">
@@ -1017,8 +1178,8 @@ function renderPomodoroPage(container) {
         </div>
       </div>
 
-      <div style="text-align:center;margin-top:var(--space-xl);color:var(--text-secondary);font-size:0.85rem">
-        <p>💡 Técnica: 25min de enfoque → 5min descanso → Cada 4 sesiones, 15min de descanso largo</p>
+      <div style="text-align:center;margin-top:var(--space-xl);color:var(--text-secondary);font-size:0.88rem;max-width:500px;margin-left:auto;margin-right:auto">
+        <p>💡 <strong>Filosofía:</strong> Durante el bloque de 25 min silencia notificaciones, pon música binaural y entra en estado de flujo total.</p>
       </div>
     </div>
   `;
@@ -1048,9 +1209,8 @@ function renderPomodoroPage(container) {
 
           if (pomodoroMode === 'focus') {
             pomodoroSessions++;
-            showToast('¡Sesión completada! Hora de descansar 🎉', 'success');
+            showToast('¡Sesión de Deep Work completada! ❄️', 'success');
 
-            // Auto-switch to break
             if (pomodoroSessions % 4 === 0) {
               pomodoroMode = 'long';
               pomodoroSeconds = POMODORO_DURATIONS.long;
@@ -1059,7 +1219,7 @@ function renderPomodoroPage(container) {
               pomodoroSeconds = POMODORO_DURATIONS.short;
             }
           } else {
-            showToast('¡Descanso terminado! Vamos a por otra sesión 💪', 'info');
+            showToast('¡Descanso terminado! Volvamos al foco 💪', 'info');
             pomodoroMode = 'focus';
             pomodoroSeconds = POMODORO_DURATIONS.focus;
           }
@@ -1102,35 +1262,39 @@ function renderPomodoroPage(container) {
   });
 }
 
-// ─── MOOD PAGE ───
+// ─── MOOD & MENTALITY PAGE ───
 function renderMoodPage(container) {
   const todayMood = moods.find((m) => m.date === todayStr());
   const moodOptions = [
-    { key: 'great', emoji: '😄', label: 'Genial', color: 'var(--accent-mood-great)' },
-    { key: 'good', emoji: '🙂', label: 'Bien', color: 'var(--accent-mood-good)' },
-    { key: 'neutral', emoji: '😐', label: 'Normal', color: 'var(--accent-mood-neutral)' },
-    { key: 'bad', emoji: '😟', label: 'Mal', color: 'var(--accent-mood-bad)' },
-    { key: 'awful', emoji: '😢', label: 'Fatal', color: 'var(--accent-mood-awful)' },
+    { key: 'great', iconName: 'shield', label: 'Imparable', color: 'var(--accent-mood-great)' },
+    { key: 'good', iconName: 'zap', label: 'Enfocado', color: 'var(--accent-mood-good)' },
+    { key: 'neutral', iconName: 'brain', label: 'Estable', color: 'var(--accent-mood-neutral)' },
+    { key: 'bad', iconName: 'frown', label: 'Fatigado', color: 'var(--accent-mood-bad)' },
+    { key: 'awful', iconName: 'flame', label: 'Prueba Dura', color: 'var(--accent-mood-awful)' },
   ];
 
   const moodColorMap = {
-    great: '#2ed573',
-    good: '#7bed9f',
-    neutral: '#ffa502',
-    bad: '#ff6b81',
-    awful: '#ff4757',
+    great: '#10b981',
+    good: '#34d399',
+    neutral: '#fbbf24',
+    bad: '#fda4af',
+    awful: '#f87171',
   };
 
   container.innerHTML = `
     <div class="tab-content">
       <div class="page-header" style="text-align:center">
-        <h1 class="page-header__title">Estado de Ánimo</h1>
-        <p class="page-header__subtitle">Registra cómo te sientes cada día para identificar patrones</p>
+        <h1 class="page-header__title" style="justify-content:center">
+          ${icon('brain', { size: 30 })} Estado Mental & Resiliencia
+        </h1>
+        <p class="page-header__subtitle">Registra tu temple psicológico para dominar el invierno</p>
       </div>
 
-      <div class="neu-card" style="max-width:500px;margin:0 auto var(--space-lg)">
+      <div class="neu-card" style="max-width:540px;margin:0 auto var(--space-lg)">
         <div class="neu-card__header">
-          <h2 class="neu-card__title">¿Cómo te sientes hoy?</h2>
+          <h2 class="neu-card__title">
+            ${icon('target', { size: 20 })} ¿Cómo está tu mentalidad hoy?
+          </h2>
           ${todayMood ? '<span class="neu-badge neu-badge--success">Registrado ✓</span>' : ''}
         </div>
         <div class="mood-selector">
@@ -1139,26 +1303,30 @@ function renderMoodPage(container) {
               (m) => `
               <div class="mood-btn ${todayMood?.mood === m.key ? 'mood-btn--active' : ''}"
                    data-mood="${m.key}" title="${m.label}"
-                   style="${todayMood?.mood === m.key ? `background:${m.color};color:white` : ''}">
-                ${m.emoji}
+                   style="${todayMood?.mood === m.key ? `background:${m.color};border-color:transparent` : ''}">
+                ${icon(m.iconName, { size: 22, color: todayMood?.mood === m.key ? '#ffffff' : 'currentColor' })}
               </div>`
             )
             .join('')}
         </div>
 
-        <!-- Optional note for today -->
         <div style="margin-top: var(--space-md)">
-          <textarea id="mood-note" class="neu-textarea" placeholder="¿Quieres añadir una nota sobre cómo te sientes?" style="min-height:70px">${todayMood?.note || ''}</textarea>
+          <textarea id="mood-note" class="neu-textarea" placeholder="Reflexión estoica del día o qué desafío superaste...">${todayMood?.note || ''}</textarea>
         </div>
       </div>
 
-      <!-- Mood History -->
-      <div class="neu-card" style="max-width:700px;margin:0 auto">
+      <!-- History -->
+      <div class="neu-card" style="max-width:720px;margin:0 auto">
         <div class="neu-card__header">
-          <h2 class="neu-card__title">📅 Historial (últimos 30 días)</h2>
+          <h2 class="neu-card__title">
+            ${icon('calendar', { size: 20 })} Registro de Temple (últimos 30 días)
+          </h2>
         </div>
         ${moods.length === 0
-          ? '<div class="empty-state"><div class="empty-state__icon">📊</div><div class="empty-state__text">Sin registros aún</div></div>'
+          ? `<div class="empty-state">
+              <div class="empty-state__icon">${icon('brain', { size: 36 })}</div>
+              <div class="empty-state__text">Sin registros de mentalidad</div>
+            </div>`
           : `
           <div class="mood-history">
             ${moods
@@ -1167,7 +1335,9 @@ function renderMoodPage(container) {
               .map(
                 (m) => `
                 <div class="mood-history__item" title="${formatDate(m.date)}: ${m.mood}${m.note ? ' — ' + m.note : ''}">
-                  <div class="mood-history__dot" style="background:${moodColorMap[m.mood] || '#ccc'}"></div>
+                  <div class="mood-history__dot" style="background:${moodColorMap[m.mood] || '#38bdf8'}">
+                    ${icon('shield', { size: 10, color: '#ffffff' })}
+                  </div>
                   <span class="mood-history__date">${formatDate(m.date)}</span>
                 </div>`
               )
@@ -1177,7 +1347,6 @@ function renderMoodPage(container) {
     </div>
   `;
 
-  // Mood selection
   container.querySelectorAll('[data-mood]').forEach((btn) => {
     btn.addEventListener('click', () => saveMood(btn.dataset.mood));
   });
@@ -1208,13 +1377,12 @@ async function saveMood(moodValue) {
     if (data) moods.unshift(data);
   }
 
-  showToast('Ánimo registrado 💙', 'success');
+  showToast('Estado mental registrado ❄️', 'success');
   renderPage();
 }
 
-// ─── Initialize ───
+// ─── App Initialization ───
 async function init() {
-  // Check for existing session
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -1226,7 +1394,6 @@ async function init() {
     renderAuth();
   }
 
-  // Listen for auth changes
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
       currentUser = session.user;
