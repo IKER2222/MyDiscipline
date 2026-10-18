@@ -1383,32 +1383,42 @@ async function saveMood(moodValue) {
 
 // ─── App Initialization ───
 async function init() {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-  if (session?.user) {
-    currentUser = session.user;
-    renderAppShell();
-  } else {
+    if (session?.user) {
+      currentUser = session.user;
+      renderAppShell();
+    } else {
+      renderAuth();
+    }
+  } catch (err) {
+    console.error('Error fetching session:', err);
     renderAuth();
   }
 
-  supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' && session?.user) {
-      currentUser = session.user;
-      renderAppShell();
-    } else if (event === 'SIGNED_OUT') {
-      currentUser = null;
-      habits = [];
-      habitLogs = [];
-      notes = [];
-      moods = [];
-      clearInterval(pomodoroTimer);
-      pomodoroRunning = false;
-      renderAuth();
-    }
-  });
+  try {
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        currentUser = session.user;
+        renderAppShell();
+      } else if (event === 'SIGNED_OUT') {
+        currentUser = null;
+        habits = [];
+        habitLogs = [];
+        notes = [];
+        moods = [];
+        clearInterval(pomodoroTimer);
+        pomodoroRunning = false;
+        renderAuth();
+      }
+    });
+  } catch (e) {
+    console.error('Error setting auth listener:', e);
+  }
 }
 
 init();
+
