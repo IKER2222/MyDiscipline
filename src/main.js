@@ -56,10 +56,25 @@ let pomodoroSeconds = 25 * 60;
 let pomodoroMode = 'focus'; // 'focus' | 'short' | 'long'
 let pomodoroRunning = false;
 let pomodoroSessions = 0;
-const POMODORO_DURATIONS = { focus: 25 * 60, short: 5 * 60, long: 15 * 60 };
+const POMODORO_DURATIONS = {
+  focus: (parseInt(localStorage.getItem('pomo_focus') || '25')) * 60,
+  short: (parseInt(localStorage.getItem('pomo_short') || '5')) * 60,
+  long: (parseInt(localStorage.getItem('pomo_long') || '15')) * 60,
+};
 
 // Mood state
 let moods = [];
+
+// Gym state
+let gymRoutines = [];
+let gymExercises = [];
+let gymSessions = [];
+let gymActiveWorkout = null;
+let gymWorkoutTimer = null;
+let gymRestTimer = null;
+let gymWorkoutElapsed = 0;
+let gymRestSecondsLeft = 0;
+let gymTab = 'routines'; // 'routines' | 'history'
 
 // ─── Date Helpers ───
 function todayStr() {
@@ -110,6 +125,35 @@ function getLast90Days() {
     days.push(d.toISOString().split('T')[0]);
   }
   return days;
+}
+
+// ─── Habit Day Helpers ───
+function isHabitDueToday(habit) {
+  const TODAY_DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const todayDay = TODAY_DAYS[new Date().getDay()];
+  const freq = habit.frequency || 'Diario';
+  if (freq === 'Diario') return true;
+  if (freq === 'L-V') return ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'].includes(todayDay);
+  if (freq === '3x/semana') return ['Lun', 'Mié', 'Vie'].includes(todayDay);
+  if (freq === 'Semanal') return todayDay === 'Lun';
+  return freq.split(',').map(d => d.trim()).includes(todayDay);
+}
+
+function getInitialHabitDays(habit) {
+  if (!habit) return ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const freq = habit.frequency || 'Diario';
+  if (freq === 'Diario') return ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  if (freq === 'L-V') return ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
+  if (freq === '3x/semana') return ['Lun', 'Mié', 'Vie'];
+  if (freq === 'Semanal') return ['Lun'];
+  return freq.split(',').map(d => d.trim()).filter(d => d);
+}
+
+function daysToFrequency(days) {
+  if (!days || days.length === 0) return 'Diario';
+  if (days.length === 7) return 'Diario';
+  if (days.length === 5 && ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'].every(d => days.includes(d))) return 'L-V';
+  return days.join(',');
 }
 
 // ─── Auth View ───
@@ -244,7 +288,10 @@ function renderAppShell() {
             <span class="sidebar__link-icon">${icon('target', { size: 19 })}</span> Dashboard
           </div>
           <div class="sidebar__link" data-page="habits">
-            <span class="sidebar__link-icon">${icon('snowflake', { size: 19 })}</span> Hábitos Arc
+            <span class="sidebar__link-icon">${icon('snowflake', { size: 19 })}</span> Habit Tracker
+          </div>
+          <div class="sidebar__link" data-page="gym">
+            <span class="sidebar__link-icon">${icon('dumbbell', { size: 19 })}</span> Gym & Fuerza
           </div>
           <div class="sidebar__link" data-page="notes">
             <span class="sidebar__link-icon">${icon('book', { size: 19 })}</span> Notas & Diario
@@ -321,8 +368,159 @@ function closeSidebar() {
 
 // ─── Data Loading ───
 async function loadAllData() {
-  await Promise.all([loadHabits(), loadHabitLogs(), loadNotes(), loadMoods()]);
+  await Promise.all([loadHabits(), loadHabitLogs(), loadNotes(), loadMoods(), loadGymData()]);
   renderPage();
+}
+
+// ─── Gym Presets & Persistence ───
+const GYM_DEFAULT_ROUTINES = [
+  {
+    name: 'Push — Pecho, Hombro & Tríceps',
+    description: 'Enfoque en empuje e hipertrofia de torso superior',
+    days: ['Lun', 'Jue'],
+    color: '#6366f1',
+    exercises: [
+      { name: 'Press de Banca Plano con Barra', sets: 4, reps: '8-10', weight: 75, rest_seconds: 120, notes: 'Controlar bajada en 2s' },
+      { name: 'Press Inclinado con Mancuernas', sets: 3, reps: '10-12', weight: 26, rest_seconds: 90, notes: 'Banco a 30 grados' },
+      { name: 'Press Militar con Mancuernas', sets: 3, reps: '8-10', weight: 22, rest_seconds: 90, notes: 'Core firme' },
+      { name: 'Elevaciones Laterales', sets: 4, reps: '12-15', weight: 12, rest_seconds: 60, notes: 'Sin balanceo' },
+      { name: 'Extensiones de Tríceps en Polea', sets: 3, reps: '12-15', weight: 30, rest_seconds: 60, notes: 'Aislar codos' },
+    ],
+  },
+  {
+    name: 'Pull — Espalda & Bíceps',
+    description: 'Densidad y amplitud de espalda más trabajo de brazos',
+    days: ['Mar', 'Vie'],
+    color: '#0ea5e9',
+    exercises: [
+      { name: 'Dominadas o Jalón al Pecho', sets: 4, reps: '8-10', weight: 0, rest_seconds: 120, notes: 'Rango completo' },
+      { name: 'Remo con Barra', sets: 4, reps: '8-10', weight: 70, rest_seconds: 90, notes: 'Espalda recta a 45°' },
+      { name: 'Remo Gironda en Polea', sets: 3, reps: '10-12', weight: 60, rest_seconds: 90, notes: 'Pausa 1s en contracción' },
+      { name: 'Face Pulls en Polea', sets: 3, reps: '15', weight: 20, rest_seconds: 60, notes: 'Codos altos' },
+      { name: 'Curl de Bíceps con Barra Z', sets: 3, reps: '10-12', weight: 30, rest_seconds: 60, notes: 'Controlar excéntrica' },
+    ],
+  },
+  {
+    name: 'Legs — Pierna Completa & Core',
+    description: 'Fuerza funcional, potencia y desarrollo de tren inferior',
+    days: ['Mié', 'Sáb'],
+    color: '#10b981',
+    exercises: [
+      { name: 'Sentadilla Trasera con Barra', sets: 4, reps: '6-8', weight: 90, rest_seconds: 150, notes: 'Paralela o profunda' },
+      { name: 'Prensa de Piernas 45°', sets: 3, reps: '10-12', weight: 180, rest_seconds: 120, notes: 'Pies a anchura de hombros' },
+      { name: 'Peso Muerto Rumano', sets: 3, reps: '8-10', weight: 80, rest_seconds: 120, notes: 'Isquios en tensión' },
+      { name: 'Extensiones de Cuádriceps', sets: 3, reps: '12-15', weight: 50, rest_seconds: 60, notes: 'Pausa arriba' },
+      { name: 'Elevaciones de Gemelos', sets: 4, reps: '15-20', weight: 60, rest_seconds: 60, notes: 'Rango completo' },
+    ],
+  },
+];
+
+function persistGymLocal() {
+  try {
+    localStorage.setItem('mydiscipline_gym_routines', JSON.stringify(gymRoutines));
+    localStorage.setItem('mydiscipline_gym_exercises', JSON.stringify(gymExercises));
+    localStorage.setItem('mydiscipline_gym_sessions', JSON.stringify(gymSessions));
+  } catch (e) {}
+}
+
+function playBeepChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(659.25, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  } catch (e) {}
+}
+
+async function loadGymData() {
+  let loaded = false;
+  if (currentUser) {
+    try {
+      const [rRes, eRes, sRes] = await Promise.all([
+        supabase.from('gym_routines').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: true }),
+        supabase.from('gym_exercises').select('*').eq('user_id', currentUser.id).order('sort_order', { ascending: true }),
+        supabase.from('gym_sessions').select('*').eq('user_id', currentUser.id).order('date', { ascending: false }).limit(30),
+      ]);
+      if (!rRes.error && !eRes.error && !sRes.error) {
+        gymRoutines = rRes.data || [];
+        gymExercises = eRes.data || [];
+        gymSessions = sRes.data || [];
+        loaded = true;
+      }
+    } catch (e) {
+      console.warn('Supabase gym tables query, using local storage fallback', e);
+    }
+  }
+
+  if (!loaded) {
+    try {
+      const lr = localStorage.getItem('mydiscipline_gym_routines');
+      const le = localStorage.getItem('mydiscipline_gym_exercises');
+      const ls = localStorage.getItem('mydiscipline_gym_sessions');
+      if (lr) gymRoutines = JSON.parse(lr);
+      if (le) gymExercises = JSON.parse(le);
+      if (ls) gymSessions = JSON.parse(ls);
+    } catch (e) {}
+  }
+
+  if (!gymRoutines || gymRoutines.length === 0) {
+    await installDefaultGymPresets();
+  }
+}
+
+async function installDefaultGymPresets() {
+  const newRoutines = [];
+  const newExercises = [];
+
+  for (const p of GYM_DEFAULT_ROUTINES) {
+    const rId = 'r_' + Math.random().toString(36).substring(2, 9);
+    newRoutines.push({
+      id: rId,
+      user_id: currentUser?.id || 'local',
+      name: p.name,
+      description: p.description,
+      days: p.days,
+      color: p.color,
+      created_at: new Date().toISOString(),
+    });
+
+    p.exercises.forEach((ex, idx) => {
+      newExercises.push({
+        id: 'e_' + Math.random().toString(36).substring(2, 9),
+        routine_id: rId,
+        user_id: currentUser?.id || 'local',
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight: ex.weight,
+        rest_seconds: ex.rest_seconds,
+        notes: ex.notes,
+        sort_order: idx,
+        created_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  gymRoutines = newRoutines;
+  gymExercises = newExercises;
+  persistGymLocal();
+
+  if (currentUser) {
+    try {
+      await supabase.from('gym_routines').insert(newRoutines);
+      await supabase.from('gym_exercises').insert(newExercises);
+    } catch (e) {}
+  }
 }
 
 async function loadHabits() {
@@ -373,6 +571,9 @@ function renderPage() {
     case 'habits':
       renderHabitsPage(main);
       break;
+    case 'gym':
+      renderGymPage(main);
+      break;
     case 'notes':
       renderNotesPage(main);
       break;
@@ -390,8 +591,9 @@ function renderPage() {
 // ─── DASHBOARD ───
 function renderDashboard(container) {
   const todayLogs = habitLogs.filter((l) => l.date === todayStr());
-  const completedToday = todayLogs.length;
-  const totalHabits = habits.length;
+  const todayHabits = habits.filter(h => isHabitDueToday(h));
+  const completedToday = todayLogs.filter(l => todayHabits.some(h => h.id === l.habit_id)).length;
+  const totalHabits = todayHabits.length;
   const todayPercent = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
 
   const longestStreak = calculateLongestStreak();
@@ -485,13 +687,13 @@ function renderDashboard(container) {
           <div class="neu-progress" style="margin-bottom: var(--space-md)">
             <div class="neu-progress__fill ${todayPercent === 100 ? 'neu-progress__fill--success' : ''}" style="width: ${todayPercent}%"></div>
           </div>
-          ${habits.length === 0
+          ${todayHabits.length === 0
             ? `<div class="empty-state">
                 <div class="empty-state__icon">${icon('snowflake', { size: 30 })}</div>
-                <div class="empty-state__text">Aún no has configurado tus hábitos</div>
-                <div class="empty-state__hint">Añade rutinas del Winter Arc para forjar disciplina</div>
+                <div class="empty-state__text">${habits.length === 0 ? 'Sin hábitos configurados' : '¡Hoy no toca ningún hábito!'}</div>
+                <div class="empty-state__hint">${habits.length === 0 ? 'Añade rutinas del Winter Arc para forjar disciplina' : 'Tus hábitos están descansando hoy'}</div>
               </div>`
-            : habits
+            : todayHabits
                 .slice(0, 6)
                 .map((h) => {
                   const done = todayLogs.some((l) => l.habit_id === h.id);
@@ -605,7 +807,7 @@ function renderHabitsPage(container) {
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-md)">
         <div>
           <h1 class="page-header__title">
-            ${icon('snowflake', { size: 28 })} Hábitos del Winter Arc
+            ${icon('snowflake', { size: 28 })} Habit Tracker
           </h1>
           <p class="page-header__subtitle">Forja una disciplina inquebrantable cada día</p>
         </div>
@@ -830,13 +1032,17 @@ function showHabitModal(editHabit = null) {
           </div>
         </div>
         <div class="neu-input-wrapper">
-          <label for="habit-freq">Frecuencia</label>
-          <select id="habit-freq" class="neu-input" style="cursor:pointer">
-            <option value="Diario" ${editHabit?.frequency === 'Diario' ? 'selected' : ''}>Diario (Winter Arc)</option>
-            <option value="L-V" ${editHabit?.frequency === 'L-V' ? 'selected' : ''}>Lunes a Viernes</option>
-            <option value="3x/semana" ${editHabit?.frequency === '3x/semana' ? 'selected' : ''}>3 veces/semana</option>
-            <option value="Semanal" ${editHabit?.frequency === 'Semanal' ? 'selected' : ''}>Semanal</option>
-          </select>
+          <label>Días de la semana</label>
+          <div class="day-picker-presets" style="margin-bottom:var(--space-sm)">
+            <span class="chip" id="hp-all">Diario</span>
+            <span class="chip" id="hp-lv">L-V</span>
+            <span class="chip" id="hp-3x">3×/sem</span>
+          </div>
+          <div class="day-picker">
+            ${[{k:'Lun',l:'L'},{k:'Mar',l:'M'},{k:'Mi\u00e9',l:'X'},{k:'Jue',l:'J'},{k:'Vie',l:'V'},{k:'S\u00e1b',l:'S'},{k:'Dom',l:'D'}]
+              .map(d => `<button type="button" class="day-btn ${getInitialHabitDays(editHabit).includes(d.k) ? 'day-btn--active' : ''}" data-hday="${d.k}">${d.l}</button>`)
+              .join('')}
+          </div>
         </div>
         <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
           <button type="button" class="neu-btn" id="habit-cancel">Cancelar</button>
@@ -849,12 +1055,28 @@ function showHabitModal(editHabit = null) {
   document.body.appendChild(backdrop);
 
   let selectedIcon = editHabit?.icon || 'snowflake';
+  let selectedDays = getInitialHabitDays(editHabit);
 
   backdrop.querySelectorAll('[data-icon]').forEach((el) => {
     el.addEventListener('click', () => {
       backdrop.querySelectorAll('[data-icon]').forEach((e) => e.classList.remove('chip--active'));
       el.classList.add('chip--active');
       selectedIcon = el.dataset.icon;
+    });
+  });
+
+  const ALL_DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const syncDayBtns = () => backdrop.querySelectorAll('[data-hday]').forEach(b => b.classList.toggle('day-btn--active', selectedDays.includes(b.dataset.hday)));
+
+  document.getElementById('hp-all').addEventListener('click', () => { selectedDays = [...ALL_DAYS]; syncDayBtns(); });
+  document.getElementById('hp-lv').addEventListener('click', () => { selectedDays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']; syncDayBtns(); });
+  document.getElementById('hp-3x').addEventListener('click', () => { selectedDays = ['Lun', 'Mié', 'Vie']; syncDayBtns(); });
+
+  backdrop.querySelectorAll('[data-hday]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const d = btn.dataset.hday;
+      selectedDays = selectedDays.includes(d) ? selectedDays.filter(x => x !== d) : [...selectedDays, d];
+      btn.classList.toggle('day-btn--active', selectedDays.includes(d));
     });
   });
 
@@ -866,7 +1088,7 @@ function showHabitModal(editHabit = null) {
   document.getElementById('habit-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('habit-name').value.trim();
-    const frequency = document.getElementById('habit-freq').value;
+    const frequency = daysToFrequency(selectedDays);
 
     if (!name) return;
 
@@ -908,6 +1130,848 @@ async function deleteHabit(id) {
   habitLogs = habitLogs.filter((l) => l.habit_id !== id);
   showToast('Hábito eliminado', 'info');
   renderPage();
+}
+
+// ─── GYM & STRENGTH PAGE ───
+function renderGymPage(container) {
+  if (gymActiveWorkout) {
+    renderActiveWorkout(container);
+    return;
+  }
+
+  const totalSessions = gymSessions.length;
+  const totalMinutes = gymSessions.reduce((acc, s) => acc + (s.duration_minutes || 0), 0);
+
+  container.innerHTML = `
+    <div class="tab-content">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-md)">
+        <div>
+          <h1 class="page-header__title">
+            ${icon('dumbbell', { size: 28 })} Gym & Rutinas de Fuerza
+          </h1>
+          <p class="page-header__subtitle">Rutinas personalizadas, seguimiento de series, peso y descanso</p>
+        </div>
+        <div style="display:flex;gap:var(--space-sm);flex-wrap:wrap">
+          <button class="neu-btn" id="restore-gym-presets-btn" title="Cargar plantillas Push/Pull/Legs">
+            ${icon('rotate', { size: 16 })} Plantillas
+          </button>
+          <button class="neu-btn neu-btn--primary" id="add-routine-btn">
+            ${icon('plus', { size: 18 })} Nueva Rutina
+          </button>
+        </div>
+      </div>
+
+      <!-- Gym Stats Bar -->
+      <div class="gym-stats-bar">
+        <div class="neu-card" style="padding:var(--space-md);text-align:center">
+          <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);text-transform:uppercase">Rutinas Activas</div>
+          <div style="font-size:1.8rem;font-weight:800;color:var(--text-primary);margin-top:4px">${gymRoutines.length}</div>
+        </div>
+        <div class="neu-card" style="padding:var(--space-md);text-align:center">
+          <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);text-transform:uppercase">Sesiones Registradas</div>
+          <div style="font-size:1.8rem;font-weight:800;color:var(--accent-success);margin-top:4px">${totalSessions}</div>
+        </div>
+        <div class="neu-card" style="padding:var(--space-md);text-align:center">
+          <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);text-transform:uppercase">Tiempo Entrenado</div>
+          <div style="font-size:1.8rem;font-weight:800;color:#38bdf8;margin-top:4px">${totalMinutes} min</div>
+        </div>
+      </div>
+
+      <!-- Sub Tabs -->
+      <div class="chip-group" style="margin-bottom:var(--space-lg)">
+        <span class="chip ${gymTab === 'routines' ? 'chip--active' : ''}" data-gym-tab="routines">
+          ${icon('dumbbell', { size: 15 })} Mis Rutinas (${gymRoutines.length})
+        </span>
+        <span class="chip ${gymTab === 'history' ? 'chip--active' : ''}" data-gym-tab="history">
+          ${icon('calendar', { size: 15 })} Historial de Entrenamientos (${totalSessions})
+        </span>
+      </div>
+
+      ${gymTab === 'routines' ? `
+        <!-- Routines Grid -->
+        <div class="gym-routines-grid">
+          ${gymRoutines.length === 0 ? `
+            <div class="neu-card empty-state" style="grid-column:1/-1">
+              <div class="empty-state__icon">${icon('dumbbell', { size: 36 })}</div>
+              <div class="empty-state__text">No tienes rutinas de entrenamiento aún</div>
+              <div class="empty-state__hint">Haz clic en "+ Nueva Rutina" o carga las plantillas Push/Pull/Legs predefinidas</div>
+              <button class="neu-btn neu-btn--primary" id="empty-load-presets-btn" style="margin-top:var(--space-md)">
+                ${icon('zap', { size: 16 })} Cargar Plantillas Winter Arc
+              </button>
+            </div>
+          ` : gymRoutines.map(r => {
+            const exercises = gymExercises.filter(e => e.routine_id === r.id);
+            const days = Array.isArray(r.days) ? r.days : (r.days ? r.days.split(',') : []);
+            return `
+              <div class="neu-card routine-card">
+                <div class="routine-card__color-bar" style="background:${r.color || '#6366f1'}"></div>
+                <div>
+                  <div class="routine-card__header">
+                    <h2 class="routine-card__title">${r.name}</h2>
+                    <div style="display:flex;gap:4px">
+                      <button class="neu-btn neu-btn--icon-sm" data-edit-routine="${r.id}" title="Editar Rutina">
+                        ${icon('edit', { size: 14 })}
+                      </button>
+                      <button class="neu-btn neu-btn--icon-sm" data-delete-routine="${r.id}" title="Eliminar Rutina">
+                        ${icon('trash', { size: 14 })}
+                      </button>
+                    </div>
+                  </div>
+                  ${r.description ? `<p class="routine-card__desc">${r.description}</p>` : ''}
+                  ${days.length > 0 ? `
+                    <div class="routine-card__days">
+                      ${days.map(d => `<span class="routine-card__day-tag">${d}</span>`).join('')}
+                    </div>
+                  ` : ''}
+
+                  <!-- Exercises Preview -->
+                  <div class="routine-exercises-preview">
+                    ${exercises.length === 0 ? `
+                      <span style="font-size:0.78rem;color:var(--text-muted);font-style:italic">Sin ejercicios configurados aún</span>
+                    ` : exercises.slice(0, 5).map(e => `
+                      <div class="routine-exercise-preview-item">
+                        <span style="font-weight:600;color:var(--text-primary)">${e.name}</span>
+                        <span style="font-variant-numeric:tabular-nums;color:var(--text-muted)">
+                          ${e.sets}×${e.reps} ${e.weight > 0 ? `(${e.weight}kg)` : ''}
+                        </span>
+                      </div>
+                    `).join('')}
+                    ${exercises.length > 5 ? `
+                      <div style="font-size:0.75rem;color:var(--text-muted);text-align:right">+${exercises.length - 5} ejercicios más</div>
+                    ` : ''}
+                  </div>
+                </div>
+
+                <div class="routine-card__footer">
+                  <span class="neu-badge neu-badge--info">${exercises.length} ejercicios</span>
+                  <button class="neu-btn neu-btn--primary" data-start-routine="${r.id}">
+                    ${icon('play', { size: 16 })} Iniciar
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : `
+        <!-- History List -->
+        <div class="neu-card" style="max-width:800px;margin:0 auto">
+          <div class="neu-card__header">
+            <h2 class="neu-card__title">${icon('calendar', { size: 20 })} Sesiones Completadas</h2>
+          </div>
+          ${gymSessions.length === 0 ? `
+            <div class="empty-state">
+              <div class="empty-state__icon">${icon('timer', { size: 36 })}</div>
+              <div class="empty-state__text">Sin registros de entrenamientos</div>
+              <div class="empty-state__hint">Selecciona una rutina y dale a "Iniciar" para registrar tu primera sesión</div>
+            </div>
+          ` : gymSessions.map(s => {
+            const routine = gymRoutines.find(r => r.id === s.routine_id);
+            const routineName = s.routine_name || routine?.name || 'Entrenamiento Libre';
+            return `
+              <div class="gym-history-item">
+                <div>
+                  <div style="font-weight:800;font-size:1.05rem;color:var(--text-primary)">${routineName}</div>
+                  <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">
+                    ${formatDate(s.date)} • ⏱️ ${s.duration_minutes || 0} min
+                  </div>
+                  ${s.notes ? `<div style="font-size:0.82rem;color:var(--text-secondary);margin-top:6px;font-style:italic">"${s.notes}"</div>` : ''}
+                </div>
+                <div>
+                  <button class="neu-btn neu-btn--icon-sm" data-delete-session="${s.id}" title="Eliminar registro">
+                    ${icon('trash', { size: 14 })}
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    </div>
+  `;
+
+  // Sub tabs event
+  container.querySelectorAll('[data-gym-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      gymTab = tab.dataset.gymTab;
+      renderGymPage(container);
+    });
+  });
+
+  // Add routine button
+  document.getElementById('add-routine-btn')?.addEventListener('click', () => showRoutineModal());
+  document.getElementById('empty-load-presets-btn')?.addEventListener('click', async () => {
+    await installDefaultGymPresets();
+    showToast('¡Plantillas cargadas con éxito! 💪', 'success');
+    renderGymPage(container);
+  });
+  document.getElementById('restore-gym-presets-btn')?.addEventListener('click', async () => {
+    if (confirm('¿Cargar las plantillas predefinidas del Winter Arc (Push/Pull/Legs)?')) {
+      await installDefaultGymPresets();
+      showToast('Plantillas añadidas ❄️', 'success');
+      renderGymPage(container);
+    }
+  });
+
+  // Routine actions
+  container.querySelectorAll('[data-start-routine]').forEach(btn => {
+    btn.addEventListener('click', () => startWorkout(btn.dataset.startRoutine));
+  });
+
+  container.querySelectorAll('[data-edit-routine]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const routine = gymRoutines.find(r => r.id === btn.dataset.editRoutine);
+      if (routine) showRoutineModal(routine);
+    });
+  });
+
+  container.querySelectorAll('[data-delete-routine]').forEach(btn => {
+    btn.addEventListener('click', () => deleteRoutine(btn.dataset.deleteRoutine));
+  });
+
+  container.querySelectorAll('[data-delete-session]').forEach(btn => {
+    btn.addEventListener('click', () => deleteGymSession(btn.dataset.deleteSession));
+  });
+}
+
+// ─── ACTIVE WORKOUT VIEW ───
+function renderActiveWorkout(container) {
+  if (!gymActiveWorkout) return;
+
+  const routine = gymRoutines.find(r => r.id === gymActiveWorkout.routineId);
+  const exercises = gymExercises.filter(e => e.routine_id === gymActiveWorkout.routineId);
+
+  const hours = Math.floor(gymWorkoutElapsed / 3600);
+  const mins = Math.floor((gymWorkoutElapsed % 3600) / 60);
+  const secs = gymWorkoutElapsed % 60;
+  const timeFormatted = (hours > 0 ? `${hours.toString().padStart(2, '0')}:` : '') +
+    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+  const restMins = Math.floor(gymRestSecondsLeft / 60).toString().padStart(2, '0');
+  const restSecs = (gymRestSecondsLeft % 60).toString().padStart(2, '0');
+
+  container.innerHTML = `
+    <div class="tab-content active-workout">
+      <!-- Top Workout Status Banner -->
+      <div class="workout-banner">
+        <div>
+          <span class="neu-badge neu-badge--success" style="margin-bottom:4px">EN VIVO</span>
+          <h1 style="font-size:1.4rem;font-weight:800;color:var(--text-primary)">
+            ${gymActiveWorkout.routineName}
+          </h1>
+        </div>
+
+        <div class="workout-timer-box">
+          <span style="color:var(--text-muted)">${icon('timer', { size: 24 })}</span>
+          <div class="workout-timer-display" id="workout-clock">${timeFormatted}</div>
+        </div>
+
+        <div style="display:flex;gap:var(--space-sm);align-items:center">
+          <button class="neu-btn neu-btn--danger" id="workout-cancel-btn">
+            ${icon('x', { size: 16 })} Cancelar
+          </button>
+          <button class="neu-btn neu-btn--primary" id="workout-finish-btn">
+            ${icon('check', { size: 16 })} Terminar
+          </button>
+        </div>
+      </div>
+
+      <!-- Rest Timer Card -->
+      <div class="rest-timer-card" id="gym-rest-card" style="display:${gymRestTimer ? 'flex' : 'none'}">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:#38bdf8">${icon('timer', { size: 26 })}</span>
+          <div>
+            <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;color:var(--text-muted)">Descanso entre series</div>
+            <div class="rest-timer-display" id="gym-rest-countdown">${restMins}:${restSecs}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:var(--space-xs);align-items:center">
+          <button type="button" class="neu-btn neu-btn--sm" id="rest-sub-15">-15s</button>
+          <button type="button" class="neu-btn neu-btn--sm" id="rest-add-30">+30s</button>
+          <button type="button" class="neu-btn neu-btn--sm neu-btn--primary" id="rest-skip">Saltar</button>
+        </div>
+      </div>
+
+      <!-- Exercise Cards -->
+      ${exercises.map(ex => {
+        const state = gymActiveWorkout.exerciseStates[ex.id] || { sets: [] };
+        return `
+          <div class="neu-card workout-exercise-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+              <div>
+                <h3 style="font-size:1.1rem;font-weight:800;color:var(--text-primary)">${ex.name}</h3>
+                <div style="font-size:0.8rem;color:var(--text-secondary);margin-top:2px">
+                  Objetivo: <strong>${ex.sets} series × ${ex.reps} reps</strong>
+                  ${ex.weight > 0 ? ` • ${ex.weight} kg` : ''}
+                  • ⏱️ ${ex.rest_seconds || 90}s descanso
+                </div>
+                ${ex.notes ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;font-style:italic">💡 ${ex.notes}</div>` : ''}
+              </div>
+              <button class="neu-btn neu-btn--sm" data-quick-rest="${ex.rest_seconds || 90}">
+                ${icon('timer', { size: 14 })} ${ex.rest_seconds || 90}s
+              </button>
+            </div>
+
+            <!-- Sets Table -->
+            <table class="sets-table">
+              <thead>
+                <tr>
+                  <th style="width:40px">Serie</th>
+                  <th>Peso (kg)</th>
+                  <th>Reps</th>
+                  <th style="width:50px">Listo</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${state.sets.map((s, idx) => `
+                  <tr class="set-row ${s.done ? 'set-row--done' : ''}">
+                    <td style="font-weight:700;color:var(--text-muted)">${idx + 1}</td>
+                    <td>
+                      <input type="number" step="0.5" class="set-input" value="${s.weight ?? ex.weight ?? 0}"
+                             data-ex-id="${ex.id}" data-set-idx="${idx}" data-field="weight" />
+                    </td>
+                    <td>
+                      <input type="text" class="set-input" value="${s.reps ?? ex.reps ?? 10}"
+                             data-ex-id="${ex.id}" data-set-idx="${idx}" data-field="reps" />
+                    </td>
+                    <td>
+                      <button type="button" class="set-check-btn ${s.done ? 'set-check-btn--done' : ''}"
+                              data-toggle-set="${ex.id}" data-set-idx="${idx}" data-rest="${ex.rest_seconds || 90}">
+                        ${s.done ? icon('check', { size: 18 }) : (idx + 1)}
+                      </button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+
+            <div style="margin-top:var(--space-sm);text-align:right">
+              <button type="button" class="neu-btn neu-btn--sm" data-add-set-to="${ex.id}">
+                ${icon('plus', { size: 14 })} Añadir Serie
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+
+      <!-- Workout Sensations Note -->
+      <div class="neu-card" style="margin-top:var(--space-lg)">
+        <label style="display:block;font-size:0.85rem;font-weight:700;color:var(--text-secondary);margin-bottom:var(--space-xs)">
+          Notas y Sensaciones de la Sesión
+        </label>
+        <textarea id="workout-notes" class="neu-textarea" placeholder="¿Cómo te has sentido? Pesos superados, RPE, fatiga...">${gymActiveWorkout.notes || ''}</textarea>
+      </div>
+
+      <!-- Bottom Finish Button -->
+      <div style="margin-top:var(--space-xl);margin-bottom:var(--space-2xl)">
+        <button class="neu-btn neu-btn--primary neu-btn--lg" id="workout-finish-bottom" style="width:100%;justify-content:center">
+          ${icon('check', { size: 20 })} Finalizar y Guardar Sesión de Gym
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Listeners for sets inputs
+  container.querySelectorAll('.set-input').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const exId = e.target.dataset.exId;
+      const idx = parseInt(e.target.dataset.setIdx);
+      const field = e.target.dataset.field;
+      if (gymActiveWorkout.exerciseStates[exId]?.sets[idx]) {
+        gymActiveWorkout.exerciseStates[exId].sets[idx][field] = e.target.value;
+      }
+    });
+  });
+
+  // Listeners for check buttons
+  container.querySelectorAll('[data-toggle-set]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const exId = btn.dataset.toggleSet;
+      const idx = parseInt(btn.dataset.setIdx);
+      const restSec = parseInt(btn.dataset.rest) || 90;
+
+      const setObj = gymActiveWorkout.exerciseStates[exId]?.sets[idx];
+      if (!setObj) return;
+
+      setObj.done = !setObj.done;
+
+      if (setObj.done) {
+        playBeepChime();
+        startRestTimer(restSec);
+        showToast('¡Serie completada! Descanso iniciado ⏱️', 'success');
+      }
+
+      renderActiveWorkout(container);
+    });
+  });
+
+  // Add set listener
+  container.querySelectorAll('[data-add-set-to]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const exId = btn.dataset.addSetTo;
+      const ex = gymExercises.find(e => e.id === exId);
+      const sets = gymActiveWorkout.exerciseStates[exId]?.sets;
+      if (sets) {
+        const last = sets[sets.length - 1];
+        sets.push({
+          setNum: sets.length + 1,
+          weight: last ? last.weight : (ex?.weight || 0),
+          reps: last ? last.reps : (ex?.reps || 10),
+          done: false,
+        });
+        renderActiveWorkout(container);
+      }
+    });
+  });
+
+  // Quick rest timer buttons
+  container.querySelectorAll('[data-quick-rest]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = parseInt(btn.dataset.quickRest) || 90;
+      startRestTimer(s);
+    });
+  });
+
+  // Rest controls
+  document.getElementById('rest-add-30')?.addEventListener('click', () => {
+    gymRestSecondsLeft += 30;
+  });
+  document.getElementById('rest-sub-15')?.addEventListener('click', () => {
+    gymRestSecondsLeft = Math.max(0, gymRestSecondsLeft - 15);
+  });
+  document.getElementById('rest-skip')?.addEventListener('click', () => {
+    clearInterval(gymRestTimer);
+    gymRestTimer = null;
+    const box = document.getElementById('gym-rest-card');
+    if (box) box.style.display = 'none';
+  });
+
+  // Notes listener
+  document.getElementById('workout-notes')?.addEventListener('input', (e) => {
+    if (gymActiveWorkout) gymActiveWorkout.notes = e.target.value;
+  });
+
+  // Cancel workout
+  document.getElementById('workout-cancel-btn')?.addEventListener('click', () => {
+    if (confirm('¿Cancelar este entrenamiento? No se guardará el registro.')) {
+      clearInterval(gymWorkoutTimer);
+      clearInterval(gymRestTimer);
+      gymWorkoutTimer = null;
+      gymRestTimer = null;
+      gymActiveWorkout = null;
+      renderGymPage(container);
+      showToast('Entrenamiento cancelado', 'info');
+    }
+  });
+
+  // Finish workout
+  const handleFinish = () => finishActiveWorkout();
+  document.getElementById('workout-finish-btn')?.addEventListener('click', handleFinish);
+  document.getElementById('workout-finish-bottom')?.addEventListener('click', handleFinish);
+}
+
+// ─── WORKOUT LOGIC ───
+function startWorkout(routineId) {
+  const routine = gymRoutines.find(r => r.id === routineId);
+  if (!routine) return;
+
+  const exercises = gymExercises.filter(e => e.routine_id === routineId);
+
+  const exerciseStates = {};
+  exercises.forEach(ex => {
+    const setsCount = parseInt(ex.sets) || 3;
+    exerciseStates[ex.id] = {
+      exercise: ex,
+      sets: Array.from({ length: setsCount }, (_, i) => ({
+        setNum: i + 1,
+        weight: ex.weight || 0,
+        reps: ex.reps || 10,
+        done: false,
+      })),
+    };
+  });
+
+  gymActiveWorkout = {
+    routineId: routine.id,
+    routineName: routine.name,
+    startTime: Date.now(),
+    exerciseStates,
+    notes: '',
+  };
+
+  gymWorkoutElapsed = 0;
+  if (gymWorkoutTimer) clearInterval(gymWorkoutTimer);
+  gymWorkoutTimer = setInterval(() => {
+    gymWorkoutElapsed++;
+    const clock = document.getElementById('workout-clock');
+    if (clock) {
+      const h = Math.floor(gymWorkoutElapsed / 3600);
+      const m = Math.floor((gymWorkoutElapsed % 3600) / 60);
+      const s = gymWorkoutElapsed % 60;
+      clock.textContent = (h > 0 ? `${h.toString().padStart(2, '0')}:` : '') +
+        `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+  }, 1000);
+
+  renderPage();
+  showToast(`¡Entrenamiento iniciado: ${routine.name}! ⚔️`, 'info');
+}
+
+function startRestTimer(seconds = 90) {
+  if (gymRestTimer) clearInterval(gymRestTimer);
+  gymRestSecondsLeft = seconds;
+
+  const updateDisplay = () => {
+    const disp = document.getElementById('gym-rest-countdown');
+    if (disp) {
+      const m = Math.floor(gymRestSecondsLeft / 60).toString().padStart(2, '0');
+      const s = (gymRestSecondsLeft % 60).toString().padStart(2, '0');
+      disp.textContent = `${m}:${s}`;
+    }
+  };
+
+  const card = document.getElementById('gym-rest-card');
+  if (card) card.style.display = 'flex';
+  updateDisplay();
+
+  gymRestTimer = setInterval(() => {
+    gymRestSecondsLeft--;
+    updateDisplay();
+    if (gymRestSecondsLeft <= 0) {
+      clearInterval(gymRestTimer);
+      gymRestTimer = null;
+      playBeepChime();
+      showToast('¡Descanso completado! A por la siguiente serie 🔥', 'success');
+      const c = document.getElementById('gym-rest-card');
+      if (c) c.style.display = 'none';
+    }
+  }, 1000);
+}
+
+async function finishActiveWorkout() {
+  if (!gymActiveWorkout) return;
+
+  clearInterval(gymWorkoutTimer);
+  clearInterval(gymRestTimer);
+  gymWorkoutTimer = null;
+  gymRestTimer = null;
+
+  const durationMin = Math.max(1, Math.round(gymWorkoutElapsed / 60));
+  const notes = document.getElementById('workout-notes')?.value?.trim() || gymActiveWorkout.notes || '';
+
+  let totalSets = 0;
+  Object.values(gymActiveWorkout.exerciseStates).forEach(st => {
+    totalSets += st.sets.filter(s => s.done).length;
+  });
+
+  const sessionData = {
+    id: 's_' + Math.random().toString(36).substring(2, 9),
+    user_id: currentUser?.id || 'local',
+    routine_id: gymActiveWorkout.routineId,
+    routine_name: gymActiveWorkout.routineName,
+    date: todayStr(),
+    duration_minutes: durationMin,
+    notes: notes,
+    created_at: new Date().toISOString(),
+  };
+
+  gymSessions.unshift(sessionData);
+  persistGymLocal();
+
+  if (currentUser) {
+    try {
+      await supabase.from('gym_sessions').insert({
+        user_id: currentUser.id,
+        routine_id: gymActiveWorkout.routineId,
+        date: todayStr(),
+        duration_minutes: durationMin,
+        notes: notes,
+      });
+    } catch (e) {}
+  }
+
+  gymActiveWorkout = null;
+  playBeepChime();
+  showToast(`¡Sesión de Gym completada en ${durationMin} min! (${totalSets} series) ❄️💪`, 'success');
+  renderPage();
+}
+
+async function deleteRoutine(routineId) {
+  if (!confirm('¿Eliminar esta rutina y todos sus ejercicios?')) return;
+
+  gymRoutines = gymRoutines.filter(r => r.id !== routineId);
+  gymExercises = gymExercises.filter(e => e.routine_id !== routineId);
+  persistGymLocal();
+
+  if (currentUser) {
+    try {
+      await supabase.from('gym_routines').delete().eq('id', routineId);
+    } catch (e) {}
+  }
+
+  showToast('Rutina eliminada', 'info');
+  renderPage();
+}
+
+async function deleteGymSession(sessionId) {
+  if (!confirm('¿Eliminar este registro de entrenamiento?')) return;
+
+  gymSessions = gymSessions.filter(s => s.id !== sessionId);
+  persistGymLocal();
+
+  if (currentUser) {
+    try {
+      await supabase.from('gym_sessions').delete().eq('id', sessionId);
+    } catch (e) {}
+  }
+
+  showToast('Sesión eliminada', 'info');
+  renderPage();
+}
+
+// ─── ROUTINE MODAL (CREATE / EDIT) ───
+function showRoutineModal(editRoutine = null) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  const initialDays = editRoutine?.days ? (Array.isArray(editRoutine.days) ? editRoutine.days : editRoutine.days.split(',')) : ['Lun', 'Jue'];
+  let selectedDays = [...initialDays];
+  const routineExercisesList = editRoutine
+    ? gymExercises.filter(e => e.routine_id === editRoutine.id)
+    : [
+        { name: 'Press de Banca Plano', sets: 4, reps: '8-10', weight: 70, rest_seconds: 120, notes: '' },
+        { name: 'Press Inclinado con Mancuernas', sets: 3, reps: '10-12', weight: 24, rest_seconds: 90, notes: '' },
+        { name: 'Elevaciones Laterales', sets: 4, reps: '15', weight: 12, rest_seconds: 60, notes: '' },
+      ];
+
+  let localExercises = routineExercisesList.map((ex, idx) => ({ ...ex, tempId: idx + 1 }));
+
+  const renderExerciseRows = () => {
+    return localExercises.map((ex, idx) => `
+      <div class="exercise-edit-item" data-row-idx="${idx}">
+        <div class="exercise-edit-grid">
+          <div>
+            <label style="font-size:0.7rem;font-weight:700;color:var(--text-muted);display:block">Ejercicio</label>
+            <input type="text" class="neu-input row-name" value="${ex.name || ''}" placeholder="Ej: Press de Banca" required />
+          </div>
+          <div>
+            <label style="font-size:0.7rem;font-weight:700;color:var(--text-muted);display:block">Series</label>
+            <input type="number" class="neu-input row-sets" value="${ex.sets || 3}" min="1" max="15" />
+          </div>
+          <div>
+            <label style="font-size:0.7rem;font-weight:700;color:var(--text-muted);display:block">Reps</label>
+            <input type="text" class="neu-input row-reps" value="${ex.reps || '10'}" placeholder="8-10" />
+          </div>
+          <div>
+            <label style="font-size:0.7rem;font-weight:700;color:var(--text-muted);display:block">Peso (kg)</label>
+            <input type="number" step="0.5" class="neu-input row-weight" value="${ex.weight || 0}" />
+          </div>
+          <div>
+            <label style="font-size:0.7rem;font-weight:700;color:var(--text-muted);display:block">Descanso (s)</label>
+            <input type="number" class="neu-input row-rest" value="${ex.rest_seconds || 90}" min="10" max="600" />
+          </div>
+          <div style="padding-top:16px">
+            <button type="button" class="neu-btn neu-btn--icon-sm row-del-btn" title="Quitar">
+              ${icon('trash', { size: 14 })}
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  };
+
+  backdrop.innerHTML = `
+    <div class="modal-content" style="max-width:680px">
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-md);display:flex;align-items:center;gap:8px">
+        ${icon('dumbbell', { size: 22 })} ${editRoutine ? 'Editar Rutina' : 'Nueva Rutina de Gym'}
+      </h2>
+
+      <form id="routine-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
+        <div class="neu-input-wrapper">
+          <label for="routine-name">Nombre de la Rutina</label>
+          <input type="text" id="routine-name" class="neu-input" placeholder="Ej: Empuje / Push Day" required value="${editRoutine?.name || ''}" />
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="routine-desc">Descripción o Enfoque</label>
+          <input type="text" id="routine-desc" class="neu-input" placeholder="Ej: Pecho, Hombro anterior y lateral, Tríceps" value="${editRoutine?.description || ''}" />
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label>Días asignados</label>
+          <div class="day-picker">
+            ${[{k:'Lun',l:'L'},{k:'Mar',l:'M'},{k:'Mié',l:'X'},{k:'Jue',l:'J'},{k:'Vie',l:'V'},{k:'Sáb',l:'S'},{k:'Dom',l:'D'}]
+              .map(d => `<button type="button" class="day-btn ${selectedDays.includes(d.k) ? 'day-btn--active' : ''}" data-rday="${d.k}">${d.l}</button>`)
+              .join('')}
+          </div>
+        </div>
+
+        <!-- Exercises Section -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-sm)">
+            <label style="font-size:0.85rem;font-weight:700;color:var(--text-secondary)">Ejercicios de la Rutina</label>
+            <button type="button" class="neu-btn neu-btn--sm" id="modal-add-exercise-btn">
+              ${icon('plus', { size: 14 })} Añadir Ejercicio
+            </button>
+          </div>
+          <div class="exercise-edit-list" id="modal-exercises-container">
+            ${renderExerciseRows()}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
+          <button type="button" class="neu-btn" id="routine-cancel">Cancelar</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editRoutine ? 'Guardar Cambios' : 'Crear Rutina'}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  // Day buttons listener
+  backdrop.querySelectorAll('[data-rday]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const d = btn.dataset.rday;
+      selectedDays = selectedDays.includes(d) ? selectedDays.filter(x => x !== d) : [...selectedDays, d];
+      btn.classList.toggle('day-btn--active', selectedDays.includes(d));
+    });
+  });
+
+  // Re-attach exercise rows logic
+  const attachRowListeners = () => {
+    const listEl = document.getElementById('modal-exercises-container');
+    listEl.querySelectorAll('.exercise-edit-item').forEach((item, idx) => {
+      item.querySelector('.row-del-btn')?.addEventListener('click', () => {
+        localExercises.splice(idx, 1);
+        listEl.innerHTML = renderExerciseRows();
+        attachRowListeners();
+      });
+      item.querySelector('.row-name')?.addEventListener('input', (e) => { localExercises[idx].name = e.target.value; });
+      item.querySelector('.row-sets')?.addEventListener('input', (e) => { localExercises[idx].sets = parseInt(e.target.value) || 3; });
+      item.querySelector('.row-reps')?.addEventListener('input', (e) => { localExercises[idx].reps = e.target.value; });
+      item.querySelector('.row-weight')?.addEventListener('input', (e) => { localExercises[idx].weight = parseFloat(e.target.value) || 0; });
+      item.querySelector('.row-rest')?.addEventListener('input', (e) => { localExercises[idx].rest_seconds = parseInt(e.target.value) || 90; });
+    });
+  };
+
+  attachRowListeners();
+
+  // Add exercise button in modal
+  document.getElementById('modal-add-exercise-btn')?.addEventListener('click', () => {
+    localExercises.push({ name: '', sets: 3, reps: '10', weight: 0, rest_seconds: 90, notes: '' });
+    const listEl = document.getElementById('modal-exercises-container');
+    listEl.innerHTML = renderExerciseRows();
+    attachRowListeners();
+  });
+
+  document.getElementById('routine-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) backdrop.remove();
+  });
+
+  // Form submit
+  document.getElementById('routine-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('routine-name').value.trim();
+    const description = document.getElementById('routine-desc').value.trim();
+
+    if (!name) return;
+
+    const validExercises = localExercises.filter(ex => ex.name && ex.name.trim());
+    if (validExercises.length === 0) {
+      showToast('Añade al menos un ejercicio a la rutina', 'error');
+      return;
+    }
+
+    let routineId = editRoutine?.id;
+
+    if (editRoutine) {
+      const idx = gymRoutines.findIndex(r => r.id === editRoutine.id);
+      if (idx >= 0) {
+        gymRoutines[idx] = {
+          ...gymRoutines[idx],
+          name,
+          description,
+          days: selectedDays,
+        };
+      }
+
+      if (currentUser) {
+        try {
+          await supabase.from('gym_routines').update({ name, description, days: selectedDays }).eq('id', editRoutine.id);
+        } catch (err) {}
+      }
+    } else {
+      routineId = 'r_' + Math.random().toString(36).substring(2, 9);
+      const newRoutine = {
+        id: routineId,
+        user_id: currentUser?.id || 'local',
+        name,
+        description,
+        days: selectedDays,
+        color: '#6366f1',
+        created_at: new Date().toISOString(),
+      };
+      gymRoutines.push(newRoutine);
+
+      if (currentUser) {
+        try {
+          const { data } = await supabase.from('gym_routines').insert({
+            user_id: currentUser.id,
+            name,
+            description,
+            days: selectedDays,
+            color: '#6366f1',
+          }).select().single();
+          if (data) {
+            routineId = data.id;
+            newRoutine.id = data.id;
+          }
+        } catch (err) {}
+      }
+    }
+
+    // Replace exercises for this routine
+    gymExercises = gymExercises.filter(ex => ex.routine_id !== routineId);
+
+    const newExs = validExercises.map((ex, idx) => ({
+      id: 'e_' + Math.random().toString(36).substring(2, 9),
+      routine_id: routineId,
+      user_id: currentUser?.id || 'local',
+      name: ex.name.trim(),
+      sets: ex.sets || 3,
+      reps: ex.reps || '10',
+      weight: ex.weight || 0,
+      rest_seconds: ex.rest_seconds || 90,
+      notes: ex.notes || '',
+      sort_order: idx,
+      created_at: new Date().toISOString(),
+    }));
+
+    gymExercises.push(...newExs);
+    persistGymLocal();
+
+    if (currentUser) {
+      try {
+        await supabase.from('gym_exercises').delete().eq('routine_id', routineId);
+        await supabase.from('gym_exercises').insert(newExs.map(ex => ({
+          routine_id: routineId,
+          user_id: currentUser.id,
+          name: ex.name,
+          sets: ex.sets,
+          reps: ex.reps,
+          weight: ex.weight,
+          rest_seconds: ex.rest_seconds,
+          sort_order: ex.sort_order,
+        })));
+      } catch (err) {}
+    }
+
+    backdrop.remove();
+    showToast(editRoutine ? 'Rutina actualizada' : '¡Rutina creada con éxito! 💪', 'success');
+    renderPage();
+  });
 }
 
 // ─── NOTES PAGE ───
@@ -1132,6 +2196,10 @@ function renderPomodoroPage(container) {
     .padStart(2, '0');
   const seconds = (pomodoroSeconds % 60).toString().padStart(2, '0');
 
+  const focusMin = Math.round(POMODORO_DURATIONS.focus / 60);
+  const shortMin = Math.round(POMODORO_DURATIONS.short / 60);
+  const longMin = Math.round(POMODORO_DURATIONS.long / 60);
+
   const modeLabels = { focus: 'Deep Work (Enfoque)', short: 'Descanso Breve', long: 'Descanso Largo' };
 
   container.innerHTML = `
@@ -1146,13 +2214,13 @@ function renderPomodoroPage(container) {
       <div class="neu-card pomodoro" style="max-width:540px;margin:0 auto">
         <div class="pomodoro__tabs">
           <span class="pomodoro__tab ${pomodoroMode === 'focus' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="focus">
-            ${icon('zap', { size: 14 })} 25m Enfoque
+            ${icon('zap', { size: 14 })} ${focusMin}m Enfoque
           </span>
           <span class="pomodoro__tab ${pomodoroMode === 'short' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="short">
-            5m Corto
+            ${shortMin}m Corto
           </span>
           <span class="pomodoro__tab ${pomodoroMode === 'long' ? 'pomodoro__tab--active' : ''}" data-pomo-mode="long">
-            15m Largo
+            ${longMin}m Largo
           </span>
         </div>
 
@@ -1178,8 +2246,35 @@ function renderPomodoroPage(container) {
         </div>
       </div>
 
+      <!-- Configuración personalizada de Deep Work -->
+      <div class="pomodoro-settings" style="max-width:540px;margin:var(--space-xl) auto 0">
+        <div class="pomodoro-settings__title">
+          ${icon('edit', { size: 18 })} Personalizar Tiempos de Deep Work
+        </div>
+        <div class="pomodoro-settings__grid">
+          <div class="pomodoro-settings__field">
+            <label for="cfg-focus">Enfoque (min)</label>
+            <input type="number" id="cfg-focus" class="pomodoro-settings__input" min="1" max="180" value="${focusMin}" />
+          </div>
+          <div class="pomodoro-settings__field">
+            <label for="cfg-short">Descanso (min)</label>
+            <input type="number" id="cfg-short" class="pomodoro-settings__input" min="1" max="60" value="${shortMin}" />
+          </div>
+          <div class="pomodoro-settings__field">
+            <label for="cfg-long">Largo (min)</label>
+            <input type="number" id="cfg-long" class="pomodoro-settings__input" min="1" max="90" value="${longMin}" />
+          </div>
+        </div>
+        <div class="pomodoro-presets-row">
+          <span style="font-size:0.75rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-right:6px">Plantillas:</span>
+          <span class="chip" id="pomo-pre-classic">25 / 5 min (Clásico)</span>
+          <span class="chip" id="pomo-pre-deep">50 / 10 min (Deep Work)</span>
+          <span class="chip" id="pomo-pre-ultra">90 / 20 min (Ultradiano)</span>
+        </div>
+      </div>
+
       <div style="text-align:center;margin-top:var(--space-xl);color:var(--text-secondary);font-size:0.88rem;max-width:500px;margin-left:auto;margin-right:auto">
-        <p>💡 <strong>Filosofía:</strong> Durante el bloque de 25 min silencia notificaciones, pon música binaural y entra en estado de flujo total.</p>
+        <p>💡 <strong>Filosofía:</strong> Ajusta los bloques a tu capacidad de concentración. Durante el bloque de Deep Work, silencia distracciones y fluye.</p>
       </div>
     </div>
   `;
@@ -1194,6 +2289,47 @@ function renderPomodoroPage(container) {
     });
   });
 
+  // Settings update helpers
+  const updateCustomDurations = (newFocus, newShort, newLong) => {
+    if (newFocus && newFocus > 0) {
+      POMODORO_DURATIONS.focus = newFocus * 60;
+      localStorage.setItem('pomo_focus', newFocus);
+    }
+    if (newShort && newShort > 0) {
+      POMODORO_DURATIONS.short = newShort * 60;
+      localStorage.setItem('pomo_short', newShort);
+    }
+    if (newLong && newLong > 0) {
+      POMODORO_DURATIONS.long = newLong * 60;
+      localStorage.setItem('pomo_long', newLong);
+    }
+    if (!pomodoroRunning) {
+      pomodoroSeconds = POMODORO_DURATIONS[pomodoroMode];
+    }
+    renderPomodoroPage(container);
+    showToast('Tiempos de Deep Work actualizados ⚡', 'info');
+  };
+
+  document.getElementById('cfg-focus')?.addEventListener('change', (e) => {
+    updateCustomDurations(parseInt(e.target.value), null, null);
+  });
+  document.getElementById('cfg-short')?.addEventListener('change', (e) => {
+    updateCustomDurations(null, parseInt(e.target.value), null);
+  });
+  document.getElementById('cfg-long')?.addEventListener('change', (e) => {
+    updateCustomDurations(null, null, parseInt(e.target.value));
+  });
+
+  document.getElementById('pomo-pre-classic')?.addEventListener('click', () => {
+    updateCustomDurations(25, 5, 15);
+  });
+  document.getElementById('pomo-pre-deep')?.addEventListener('click', () => {
+    updateCustomDurations(50, 10, 20);
+  });
+  document.getElementById('pomo-pre-ultra')?.addEventListener('click', () => {
+    updateCustomDurations(90, 20, 30);
+  });
+
   // Toggle
   document.getElementById('pomo-toggle').addEventListener('click', () => {
     if (pomodoroRunning) {
@@ -1206,6 +2342,7 @@ function renderPomodoroPage(container) {
         if (pomodoroSeconds <= 0) {
           clearInterval(pomodoroTimer);
           pomodoroRunning = false;
+          playBeepChime();
 
           if (pomodoroMode === 'focus') {
             pomodoroSessions++;
