@@ -8,6 +8,13 @@ import { supabase } from './supabaseClient.js';
 import { showToast } from './toast.js';
 import { getDailyQuote } from './quotes.js';
 import { icon, ICONS, WINTER_ARC_PRESETS } from './icons.js';
+import {
+  storeLocalFile,
+  getLocalFile,
+  removeLocalFile,
+  downloadLocalFile,
+  pickUserLocalDirectory,
+} from './agendaStorage.js';
 
 // ─── Theme State ───
 let currentTheme = localStorage.getItem('mydiscipline_theme') || 'dark';
@@ -75,6 +82,15 @@ let gymRestTimer = null;
 let gymWorkoutElapsed = 0;
 let gymRestSecondsLeft = 0;
 let gymTab = 'routines'; // 'routines' | 'history'
+
+// Agenda & Academia state
+let agendaSubjects = [];
+let agendaTasks = [];
+let agendaExams = [];
+let agendaFiles = [];
+let agendaTab = 'overview'; // 'overview' | 'tasks' | 'exams' | 'subjects'
+let agendaFilterSubject = 'all';
+let agendaFilterStatus = 'all';
 
 // ─── Date Helpers ───
 function todayStr() {
@@ -293,6 +309,9 @@ function renderAppShell() {
           <div class="sidebar__link" data-page="gym">
             <span class="sidebar__link-icon">${icon('dumbbell', { size: 19 })}</span> Gym & Fuerza
           </div>
+          <div class="sidebar__link" data-page="agenda">
+            <span class="sidebar__link-icon">${icon('academic', { size: 19 })}</span> Agenda & Academia
+          </div>
           <div class="sidebar__link" data-page="notes">
             <span class="sidebar__link-icon">${icon('book', { size: 19 })}</span> Notas & Diario
           </div>
@@ -368,7 +387,7 @@ function closeSidebar() {
 
 // ─── Data Loading ───
 async function loadAllData() {
-  await Promise.all([loadHabits(), loadHabitLogs(), loadNotes(), loadMoods(), loadGymData()]);
+  await Promise.all([loadHabits(), loadHabitLogs(), loadNotes(), loadMoods(), loadGymData(), loadAgendaData()]);
   renderPage();
 }
 
@@ -523,6 +542,182 @@ async function installDefaultGymPresets() {
   }
 }
 
+// ─── Agenda & Academic Persistence ───
+const AGENDA_DEFAULT_SUBJECTS = [
+  {
+    id: 'subj_dev',
+    name: 'Desarrollo Web & Software',
+    code: 'DEV',
+    color: '#38bdf8',
+    professor: 'Prof. Marcos S.',
+    schedule: 'Lun & Mié 09:00 - 11:00',
+    storage_type: 'gdrive',
+    storage_link: 'https://drive.google.com',
+    local_folder_name: null,
+  },
+  {
+    id: 'subj_mat',
+    name: 'Matemáticas Discretas & Algoritmos',
+    code: 'MAT',
+    color: '#6366f1',
+    professor: 'Dra. Ramos',
+    schedule: 'Mar & Jue 11:30 - 13:30',
+    storage_type: 'local',
+    storage_link: '',
+    local_folder_name: 'Apuntes_Matematicas_2026',
+  },
+  {
+    id: 'subj_emp',
+    name: 'Emprendimiento & Negocios',
+    code: 'EMP',
+    color: '#10b981',
+    professor: 'Carlos Valdés (Mentor)',
+    schedule: 'Viernes 10:00 - 12:30',
+    storage_type: 'onedrive',
+    storage_link: 'https://onedrive.live.com',
+    local_folder_name: null,
+  },
+];
+
+const AGENDA_DEFAULT_TASKS = [
+  {
+    id: 'task_1',
+    subject_id: 'subj_dev',
+    title: 'Práctica 2: Maquetación Neumórfica & Responsive',
+    description: 'Completar diseño responsivo y asegurar accesibilidad WCAG.',
+    due_date: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
+    due_time: '23:59',
+    priority: 'high',
+    status: 'pending',
+  },
+  {
+    id: 'task_2',
+    subject_id: 'subj_mat',
+    title: 'Problemas Tema 3: Grafos y Árboles Binarios',
+    description: 'Ejercicios 14 al 28 del boletín de problemas.',
+    due_date: new Date(Date.now() + 4 * 86400000).toISOString().split('T')[0],
+    due_time: '18:00',
+    priority: 'medium',
+    status: 'pending',
+  },
+  {
+    id: 'task_3',
+    subject_id: 'subj_emp',
+    title: 'Validación de Mercado: 10 Entrevistas con Clientes',
+    description: 'Documentar hipótesis del Canvas y feedback recibido.',
+    due_date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+    due_time: '14:00',
+    priority: 'high',
+    status: 'pending',
+  },
+];
+
+const AGENDA_DEFAULT_EXAMS = [
+  {
+    id: 'exam_1',
+    subject_id: 'subj_mat',
+    title: 'Examen Parcial: Grafos y Complejidad Algorítmica',
+    syllabus: 'Temas 1 a 3: Teoría de grafos, caminos mínimos, árboles y recursión.',
+    date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
+    time: '10:00',
+    location: 'Aula 2.4 - Edificio Central',
+    weight_percent: 40,
+    grade: null,
+  },
+  {
+    id: 'exam_2',
+    subject_id: 'subj_emp',
+    title: 'Pitch Deck & Presentación ante Inversores',
+    syllabus: 'Presentación de 5 min con Q&A sobre métricas CAC, LTV y TAM.',
+    date: new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
+    time: '11:30',
+    location: 'Auditorio Principal',
+    weight_percent: 50,
+    grade: null,
+  },
+];
+
+const AGENDA_DEFAULT_FILES = [
+  {
+    id: 'f_1',
+    subject_id: 'subj_mat',
+    title: 'Resumen_Tema_1_Grafos_Eulerianos.pdf',
+    storage_type: 'local',
+    file_size: 1024 * 1024 * 2.3,
+    url: null,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'f_2',
+    subject_id: 'subj_emp',
+    title: 'Plantilla_Business_Model_Canvas.xlsx',
+    storage_type: 'onedrive',
+    file_size: 1024 * 480,
+    url: 'https://onedrive.live.com',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'f_3',
+    subject_id: 'subj_dev',
+    title: 'Guia_CSS_Variables_Neumorfismo.pdf',
+    storage_type: 'gdrive',
+    file_size: 1024 * 1024 * 1.1,
+    url: 'https://drive.google.com',
+    created_at: new Date().toISOString(),
+  },
+];
+
+function persistAgendaLocal() {
+  try {
+    localStorage.setItem('mydiscipline_agenda_subjects', JSON.stringify(agendaSubjects));
+    localStorage.setItem('mydiscipline_agenda_tasks', JSON.stringify(agendaTasks));
+    localStorage.setItem('mydiscipline_agenda_exams', JSON.stringify(agendaExams));
+    localStorage.setItem('mydiscipline_agenda_files', JSON.stringify(agendaFiles));
+  } catch (e) {}
+}
+
+async function loadAgendaData() {
+  let loaded = false;
+  if (currentUser) {
+    try {
+      const [sRes, tRes, eRes, fRes] = await Promise.all([
+        supabase.from('agenda_subjects').select('*').eq('user_id', currentUser.id),
+        supabase.from('agenda_tasks').select('*').eq('user_id', currentUser.id),
+        supabase.from('agenda_exams').select('*').eq('user_id', currentUser.id),
+        supabase.from('agenda_files').select('*').eq('user_id', currentUser.id),
+      ]);
+      if (!sRes.error && !tRes.error && !eRes.error) {
+        agendaSubjects = sRes.data || [];
+        agendaTasks = tRes.data || [];
+        agendaExams = eRes.data || [];
+        agendaFiles = fRes?.data || [];
+        loaded = true;
+      }
+    } catch (e) {}
+  }
+
+  if (!loaded) {
+    try {
+      const ls = localStorage.getItem('mydiscipline_agenda_subjects');
+      const lt = localStorage.getItem('mydiscipline_agenda_tasks');
+      const le = localStorage.getItem('mydiscipline_agenda_exams');
+      const lf = localStorage.getItem('mydiscipline_agenda_files');
+      if (ls) agendaSubjects = JSON.parse(ls);
+      if (lt) agendaTasks = JSON.parse(lt);
+      if (le) agendaExams = JSON.parse(le);
+      if (lf) agendaFiles = JSON.parse(lf);
+    } catch (e) {}
+  }
+
+  if (!agendaSubjects || agendaSubjects.length === 0) {
+    agendaSubjects = [...AGENDA_DEFAULT_SUBJECTS];
+    agendaTasks = [...AGENDA_DEFAULT_TASKS];
+    agendaExams = [...AGENDA_DEFAULT_EXAMS];
+    agendaFiles = [...AGENDA_DEFAULT_FILES];
+    persistAgendaLocal();
+  }
+}
+
 async function loadHabits() {
   const { data } = await supabase
     .from('habits')
@@ -574,6 +769,9 @@ function renderPage() {
     case 'gym':
       renderGymPage(main);
       break;
+    case 'agenda':
+      renderAgendaPage(main);
+      break;
     case 'notes':
       renderNotesPage(main);
       break;
@@ -600,6 +798,12 @@ function renderDashboard(container) {
   const currentStreak = calculateCurrentStreak();
   const quote = getDailyQuote();
   const todayMood = moods.find((m) => m.date === todayStr());
+
+  const upcomingExams = agendaExams
+    .filter((e) => new Date(e.date) >= new Date(todayStr()))
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, 3);
+  const pendingTasksCount = agendaTasks.filter((t) => t.status !== 'completed').length;
 
   const weekDays = getWeekDays();
   const today = new Date();
@@ -742,11 +946,63 @@ function renderDashboard(container) {
                 )
                 .join('')}
         </div>
+
+        <!-- Academic Deadlines Widget -->
+        <div class="neu-card" style="grid-column: 1 / -1">
+          <div class="neu-card__header">
+            <h2 class="neu-card__title">
+              ${icon('academic', { size: 20 })} Agenda & Exámenes Críticos
+            </h2>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="neu-badge neu-badge--warning">${pendingTasksCount} tareas pendientes</span>
+              <button class="neu-btn neu-btn--sm" id="dash-go-agenda-btn">Ver Agenda Completa →</button>
+            </div>
+          </div>
+          ${upcomingExams.length === 0
+            ? `<div class="empty-state" style="padding:var(--space-md)">
+                <div class="empty-state__icon" style="width:40px;height:40px">${icon('academic', { size: 20 })}</div>
+                <div class="empty-state__text" style="font-size:0.9rem">Sin exámenes próximos programados</div>
+                <div class="empty-state__hint">Añade hitos importantes en tu agenda para activar la cuenta atrás</div>
+              </div>`
+            : `<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:var(--space-md)">
+                ${upcomingExams.map(ex => {
+                  const subj = agendaSubjects.find(s => s.id === ex.subject_id);
+                  const cd = getExamCountdownInfo(ex.date);
+                  return `
+                    <div class="exam-card" style="margin-bottom:0">
+                      <div class="exam-card__top">
+                        <div>
+                          <div class="exam-card__title">${ex.title}</div>
+                          ${subj ? `
+                            <div class="subject-tag" style="margin-top:4px">
+                              <span class="subject-tag__dot" style="background:${subj.color || '#38bdf8'}"></span>
+                              <span>${subj.name}</span>
+                            </div>
+                          ` : ''}
+                        </div>
+                        <span class="countdown-badge ${cd.badgeClass}">${cd.text}</span>
+                      </div>
+                      <div class="exam-card__meta">
+                        <span>📅 ${formatDate(ex.date)} ${ex.time ? '• ⏰ ' + ex.time : ''}</span>
+                        ${ex.location ? `<span>📍 ${ex.location}</span>` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>`
+          }
+        </div>
       </div>
     </div>
   `;
 
   document.getElementById('header-theme-btn').addEventListener('click', toggleTheme);
+
+  document.getElementById('dash-go-agenda-btn')?.addEventListener('click', () => {
+    currentPage = 'agenda';
+    renderAppShell();
+    renderPage();
+  });
 
   container.querySelectorAll('[data-dash-toggle]').forEach((el) => {
     el.addEventListener('click', () => toggleHabitLog(el.dataset.habitId));
@@ -1971,6 +2227,1213 @@ function showRoutineModal(editRoutine = null) {
     backdrop.remove();
     showToast(editRoutine ? 'Rutina actualizada' : '¡Rutina creada con éxito! 💪', 'success');
     renderPage();
+  });
+}
+
+// ─── AGENDA & ACADEMIA PAGE ───
+function getExamCountdownInfo(dateStr) {
+  const today = new Date(todayStr() + 'T00:00:00');
+  const target = new Date(dateStr + 'T00:00:00');
+  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    return { text: 'Realizado', badgeClass: 'countdown-badge--safe', isUrgent: false, days: diffDays };
+  }
+  if (diffDays === 0) {
+    return { text: '¡HOY!', badgeClass: 'countdown-badge--urgent', isUrgent: true, days: 0 };
+  }
+  if (diffDays === 1) {
+    return { text: '¡Mañana!', badgeClass: 'countdown-badge--urgent', isUrgent: true, days: 1 };
+  }
+  if (diffDays <= 3) {
+    return { text: `Faltan ${diffDays} días`, badgeClass: 'countdown-badge--urgent', isUrgent: true, days: diffDays };
+  }
+  if (diffDays <= 7) {
+    return { text: `En ${diffDays} días`, badgeClass: 'countdown-badge--warning', isUrgent: false, days: diffDays };
+  }
+  return { text: `En ${diffDays} días`, badgeClass: 'countdown-badge--safe', isUrgent: false, days: diffDays };
+}
+
+function renderAgendaPage(container) {
+  const pendingTasks = agendaTasks.filter(t => t.status !== 'completed');
+  const completedTasks = agendaTasks.filter(t => t.status === 'completed');
+  const totalTasks = agendaTasks.length;
+  const taskPercent = totalTasks > 0 ? Math.round((completedTasks.length / totalTasks) * 100) : 0;
+
+  // Filter tasks based on current filters
+  let filteredTasks = [...agendaTasks];
+  if (agendaFilterSubject !== 'all') {
+    filteredTasks = filteredTasks.filter(t => t.subject_id === agendaFilterSubject);
+  }
+  if (agendaFilterStatus === 'pending') {
+    filteredTasks = filteredTasks.filter(t => t.status !== 'completed');
+  } else if (agendaFilterStatus === 'completed') {
+    filteredTasks = filteredTasks.filter(t => t.status === 'completed');
+  }
+
+  // Sort upcoming exams
+  const sortedExams = [...agendaExams].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  container.innerHTML = `
+    <div class="tab-content">
+      <!-- Page Header -->
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-md)">
+        <div>
+          <h1 class="page-header__title">
+            ${icon('academic', { size: 28 })} Agenda & Academia
+          </h1>
+          <p class="page-header__subtitle">Gestión de deberes, exámenes con cuenta atrás y temarios sin depender de un servidor</p>
+        </div>
+        <div style="display:flex;gap:var(--space-sm);flex-wrap:wrap">
+          <button class="neu-btn" id="agenda-add-subj-btn">
+            ${icon('plus', { size: 16 })} Asignatura
+          </button>
+          <button class="neu-btn" id="agenda-add-exam-btn">
+            ${icon('timer', { size: 16 })} Examen
+          </button>
+          <button class="neu-btn neu-btn--primary" id="agenda-add-task-btn">
+            ${icon('plus', { size: 18 })} Deberes / Tarea
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Sub-tabs -->
+      <div class="chip-group" style="margin-bottom:var(--space-lg)">
+        <span class="chip ${agendaTab === 'overview' ? 'chip--active' : ''}" data-agenda-tab="overview">
+          ${icon('target', { size: 15 })} Visión General
+        </span>
+        <span class="chip ${agendaTab === 'exams' ? 'chip--active' : ''}" data-agenda-tab="exams">
+          ${icon('timer', { size: 15 })} Exámenes (${agendaExams.length})
+        </span>
+        <span class="chip ${agendaTab === 'tasks' ? 'chip--active' : ''}" data-agenda-tab="tasks">
+          ${icon('check', { size: 15 })} Deberes & Entregas (${pendingTasks.length} pendientes)
+        </span>
+        <span class="chip ${agendaTab === 'subjects' ? 'chip--active' : ''}" data-agenda-tab="subjects">
+          ${icon('book', { size: 15 })} Asignaturas & Apuntes (${agendaSubjects.length})
+        </span>
+      </div>
+
+      <!-- Tab Content: OVERVIEW (WIDGETS) -->
+      ${agendaTab === 'overview' ? `
+        <div class="agenda-widgets-grid">
+          <!-- Widget 1: Próximos Exámenes & Cuenta Atrás -->
+          <div class="neu-card agenda-widget">
+            <div class="agenda-widget__header">
+              <h2 class="agenda-widget__title">
+                ${icon('timer', { size: 20 })} Próximos Exámenes
+              </h2>
+              <span class="neu-badge neu-badge--info">${agendaExams.length}</span>
+            </div>
+            ${sortedExams.length === 0 ? `
+              <div class="empty-state" style="padding:var(--space-lg)">
+                <div class="empty-state__icon" style="width:48px;height:48px">${icon('timer', { size: 24 })}</div>
+                <div class="empty-state__text" style="font-size:0.92rem">Sin exámenes próximos</div>
+                <div class="empty-state__hint">¡Tiempo ideal para avanzar temario!</div>
+              </div>
+            ` : sortedExams.slice(0, 3).map(ex => {
+              const subj = agendaSubjects.find(s => s.id === ex.subject_id);
+              const cd = getExamCountdownInfo(ex.date);
+              return `
+                <div class="exam-card">
+                  <div class="exam-card__top">
+                    <div>
+                      <div class="exam-card__title">${ex.title}</div>
+                      ${subj ? `
+                        <div class="subject-tag" style="margin-top:6px">
+                          <span class="subject-tag__dot" style="background:${subj.color || '#38bdf8'}"></span>
+                          <span>${subj.name}</span>
+                        </div>
+                      ` : ''}
+                    </div>
+                    <span class="countdown-badge ${cd.badgeClass}">${cd.text}</span>
+                  </div>
+                  <div class="exam-card__meta">
+                    <span>📅 ${formatDate(ex.date)} ${ex.time ? '• ⏰ ' + ex.time : ''}</span>
+                    ${ex.location ? `<span>📍 ${ex.location}</span>` : ''}
+                    ${ex.weight_percent ? `<span>⚖️ ${ex.weight_percent}%</span>` : ''}
+                  </div>
+                  ${ex.syllabus ? `
+                    <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:6px;font-style:italic">
+                      📖 ${ex.syllabus}
+                    </div>
+                  ` : ''}
+                </div>
+              `;
+            }).join('')}
+            ${sortedExams.length > 3 ? `
+              <div style="text-align:right;margin-top:var(--space-xs)">
+                <a href="#" class="btn-link" data-switch-to="exams" style="font-size:0.8rem;color:#38bdf8;font-weight:700">Ver todos (${sortedExams.length}) →</a>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Widget 2: Deberes & Entregas de la Semana -->
+          <div class="neu-card agenda-widget">
+            <div class="agenda-widget__header">
+              <h2 class="agenda-widget__title">
+                ${icon('check', { size: 20 })} Deberes & Tareas
+              </h2>
+              <span class="neu-badge neu-badge--warning">${pendingTasks.length} pendientes</span>
+            </div>
+            ${pendingTasks.length === 0 ? `
+              <div class="empty-state" style="padding:var(--space-lg)">
+                <div class="empty-state__icon" style="width:48px;height:48px">${icon('check', { size: 24 })}</div>
+                <div class="empty-state__text" style="font-size:0.92rem">¡Al día con las tareas!</div>
+                <div class="empty-state__hint">No tienes deberes pendientes ahora mismo</div>
+              </div>
+            ` : pendingTasks.slice(0, 4).map(t => {
+              const subj = agendaSubjects.find(s => s.id === t.subject_id);
+              const isToday = t.due_date === todayStr();
+              return `
+                <div class="task-row">
+                  <div class="task-row__left">
+                    <button class="set-check-btn" data-toggle-task="${t.id}" title="Marcar como entregado">
+                      ${icon('check', { size: 16 })}
+                    </button>
+                    <div style="min-width:0">
+                      <div class="task-row__title" title="${t.title}">${t.title}</div>
+                      <div style="display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap">
+                        ${subj ? `
+                          <span style="font-size:0.7rem;font-weight:700;color:${subj.color || 'var(--text-muted)'}">${subj.code || subj.name}</span>
+                        ` : ''}
+                        <span style="font-size:0.72rem;color:${isToday ? 'var(--accent-danger)' : 'var(--text-muted)'};font-weight:${isToday ? '800' : '600'}">
+                          ${isToday ? '⚠️ ¡Hoy!' : formatDate(t.due_date)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="task-row__right">
+                    <span class="priority-badge priority-badge--${t.priority || 'medium'}">${t.priority || 'media'}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            ${pendingTasks.length > 4 ? `
+              <div style="text-align:right;margin-top:var(--space-xs)">
+                <a href="#" class="btn-link" data-switch-to="tasks" style="font-size:0.8rem;color:#38bdf8;font-weight:700">Ver todas las tareas →</a>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Widget 3: Progreso & Multitarea -->
+          <div class="neu-card agenda-widget">
+            <div class="agenda-widget__header">
+              <h2 class="agenda-widget__title">
+                ${icon('chart', { size: 20 })} Rendimiento Académico
+              </h2>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);margin-bottom:var(--space-md)">
+              <div style="padding:var(--space-md);background:var(--bg-secondary);border-radius:var(--radius-sm);text-align:center;box-shadow:var(--neu-shadow-inset-sm)">
+                <div style="font-size:0.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase">Tareas Listas</div>
+                <div style="font-size:1.6rem;font-weight:800;color:var(--accent-success);margin-top:4px">${completedTasks.length} / ${totalTasks}</div>
+              </div>
+              <div style="padding:var(--space-md);background:var(--bg-secondary);border-radius:var(--radius-sm);text-align:center;box-shadow:var(--neu-shadow-inset-sm)">
+                <div style="font-size:0.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase">Asignaturas</div>
+                <div style="font-size:1.6rem;font-weight:800;color:#38bdf8;margin-top:4px">${agendaSubjects.length}</div>
+              </div>
+            </div>
+
+            <div style="margin-bottom:var(--space-sm)">
+              <div style="display:flex;justify-content:space-between;font-size:0.8rem;font-weight:700;color:var(--text-secondary);margin-bottom:4px">
+                <span>Completitud de Deberes</span>
+                <span>${taskPercent}%</span>
+              </div>
+              <div class="neu-progress">
+                <div class="neu-progress__fill" style="width:${taskPercent}%"></div>
+              </div>
+            </div>
+
+            <div style="margin-top:var(--space-md);padding:var(--space-sm);background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:0.8rem;color:var(--text-secondary);box-shadow:var(--neu-shadow-inset-sm)">
+              💡 <strong>Enfoque Winter Arc:</strong> Usa bloques de <strong>Deep Work</strong> de 50 min para preparar las tareas de alta prioridad sin distracciones.
+            </div>
+          </div>
+        </div>
+
+        <!-- Subjects Quick Access Banner -->
+        <div class="neu-card" style="margin-top:var(--space-lg)">
+          <div class="neu-card__header">
+            <h2 class="neu-card__title">${icon('folder', { size: 20 })} Acceso Rápido a Apuntes & Carpetas</h2>
+            <button class="neu-btn neu-btn--sm" data-switch-to="subjects">Ver todas</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:var(--space-md)">
+            ${agendaSubjects.map(s => {
+              const files = agendaFiles.filter(f => f.subject_id === s.id);
+              let storageLabel = '📁 Local (PC)';
+              let storageClass = 'storage-pill--local';
+              if (s.storage_type === 'gdrive') { storageLabel = '☁️ Google Drive'; storageClass = 'storage-pill--gdrive'; }
+              if (s.storage_type === 'onedrive') { storageLabel = '☁️ OneDrive'; storageClass = 'storage-pill--onedrive'; }
+              return `
+                <div class="file-item">
+                  <div class="file-item__info">
+                    <span class="subject-tag__dot" style="background:${s.color || '#38bdf8'};width:12px;height:12px"></span>
+                    <div>
+                      <div class="file-item__name">${s.name}</div>
+                      <span class="storage-pill ${storageClass}" style="margin-top:4px">${storageLabel}</span>
+                    </div>
+                  </div>
+                  <button class="neu-btn neu-btn--sm" data-open-subject-files="${s.id}">
+                    ${icon('folder', { size: 14 })} ${files.length} apuntes
+                  </button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Tab Content: EXAMS -->
+      ${agendaTab === 'exams' ? `
+        <div class="neu-card">
+          <div class="neu-card__header">
+            <h2 class="neu-card__title">${icon('timer', { size: 22 })} Calendario & Exámenes Programados</h2>
+            <button class="neu-btn neu-btn--primary" id="exams-tab-add-btn">
+              ${icon('plus', { size: 16 })} Nuevo Examen
+            </button>
+          </div>
+          ${agendaExams.length === 0 ? `
+            <div class="empty-state">
+              <div class="empty-state__icon">${icon('timer', { size: 36 })}</div>
+              <div class="empty-state__text">Sin exámenes programados</div>
+              <div class="empty-state__hint">Añade los parciales y entregas finales para activar la cuenta atrás</div>
+            </div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:var(--space-md)">
+              ${sortedExams.map(ex => {
+                const subj = agendaSubjects.find(s => s.id === ex.subject_id);
+                const cd = getExamCountdownInfo(ex.date);
+                return `
+                  <div class="exam-card" style="padding:var(--space-lg)">
+                    <div class="exam-card__top">
+                      <div>
+                        <div style="font-size:1.15rem;font-weight:800;color:var(--text-primary)">${ex.title}</div>
+                        ${subj ? `
+                          <div class="subject-tag" style="margin-top:6px">
+                            <span class="subject-tag__dot" style="background:${subj.color || '#38bdf8'}"></span>
+                            <span>${subj.name} (${subj.code || 'ASIG'})</span>
+                          </div>
+                        ` : ''}
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <span class="countdown-badge ${cd.badgeClass}" style="font-size:0.85rem">${cd.text}</span>
+                        <button class="neu-btn neu-btn--icon-sm" data-edit-exam="${ex.id}" title="Editar">
+                          ${icon('edit', { size: 14 })}
+                        </button>
+                        <button class="neu-btn neu-btn--icon-sm" data-delete-exam="${ex.id}" title="Eliminar">
+                          ${icon('trash', { size: 14 })}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="exam-card__meta" style="margin-top:10px;font-size:0.85rem">
+                      <span>📅 <strong>Fecha:</strong> ${formatDate(ex.date)}</span>
+                      ${ex.time ? `<span>⏰ <strong>Hora:</strong> ${ex.time}</span>` : ''}
+                      ${ex.location ? `<span>📍 <strong>Lugar / Aula:</strong> ${ex.location}</span>` : ''}
+                      ${ex.weight_percent ? `<span>⚖️ <strong>Ponderación:</strong> ${ex.weight_percent}%</span>` : ''}
+                    </div>
+
+                    ${ex.syllabus ? `
+                      <div style="margin-top:10px;padding:var(--space-sm) var(--space-md);background:var(--bg-card);border-radius:var(--radius-xs);border:1px solid var(--border-subtle)">
+                        <span style="font-size:0.75rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);display:block">Temario a evaluar:</span>
+                        <div style="font-size:0.85rem;color:var(--text-primary);margin-top:2px">${ex.syllabus}</div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      ` : ''}
+
+      <!-- Tab Content: TASKS (DEBERES) -->
+      ${agendaTab === 'tasks' ? `
+        <div class="neu-card">
+          <!-- Filter Controls -->
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-md);margin-bottom:var(--space-lg)">
+            <div style="display:flex;gap:var(--space-sm);flex-wrap:wrap;align-items:center">
+              <span style="font-size:0.8rem;font-weight:700;color:var(--text-muted)">Filtrar:</span>
+              <select id="tasks-filter-subj" class="neu-input" style="padding:4px 10px;font-size:0.82rem;width:auto">
+                <option value="all" ${agendaFilterSubject === 'all' ? 'selected' : ''}>Todas las asignaturas</option>
+                ${agendaSubjects.map(s => `<option value="${s.id}" ${agendaFilterSubject === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}
+              </select>
+              <select id="tasks-filter-status" class="neu-input" style="padding:4px 10px;font-size:0.82rem;width:auto">
+                <option value="all" ${agendaFilterStatus === 'all' ? 'selected' : ''}>Todos los estados</option>
+                <option value="pending" ${agendaFilterStatus === 'pending' ? 'selected' : ''}>Solo pendientes</option>
+                <option value="completed" ${agendaFilterStatus === 'completed' ? 'selected' : ''}>Solo completados</option>
+              </select>
+            </div>
+            <button class="neu-btn neu-btn--primary" id="tasks-tab-add-btn">
+              ${icon('plus', { size: 16 })} Nueva Tarea
+            </button>
+          </div>
+
+          <!-- Tasks List -->
+          ${filteredTasks.length === 0 ? `
+            <div class="empty-state">
+              <div class="empty-state__icon">${icon('check', { size: 36 })}</div>
+              <div class="empty-state__text">No hay tareas que mostrar con estos filtros</div>
+            </div>
+          ` : `
+            <div>
+              ${filteredTasks.map(t => {
+                const subj = agendaSubjects.find(s => s.id === t.subject_id);
+                const isDone = t.status === 'completed';
+                return `
+                  <div class="task-row ${isDone ? 'task-row--done' : ''}">
+                    <div class="task-row__left">
+                      <button class="set-check-btn ${isDone ? 'set-check-btn--done' : ''}" data-toggle-task="${t.id}" title="${isDone ? 'Marcar pendiente' : 'Marcar completado'}">
+                        ${icon('check', { size: 18 })}
+                      </button>
+                      <div style="min-width:0">
+                        <div class="task-row__title" title="${t.title}">${t.title}</div>
+                        ${t.description ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">${t.description}</div>` : ''}
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+                          ${subj ? `
+                            <span class="subject-tag">
+                              <span class="subject-tag__dot" style="background:${subj.color || '#38bdf8'}"></span>
+                              <span>${subj.name}</span>
+                            </span>
+                          ` : ''}
+                          <span style="font-size:0.75rem;color:var(--text-muted)">
+                            📅 ${formatDate(t.due_date)} ${t.due_time ? '⏰ ' + t.due_time : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="task-row__right">
+                      <span class="priority-badge priority-badge--${t.priority || 'medium'}">${t.priority || 'media'}</span>
+                      <button class="neu-btn neu-btn--icon-sm" data-edit-task="${t.id}" title="Editar">
+                        ${icon('edit', { size: 14 })}
+                      </button>
+                      <button class="neu-btn neu-btn--icon-sm" data-delete-task="${t.id}" title="Eliminar">
+                        ${icon('trash', { size: 14 })}
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      ` : ''}
+
+      <!-- Tab Content: SUBJECTS & NOTES -->
+      ${agendaTab === 'subjects' ? `
+        <div>
+          <div class="subjects-grid">
+            ${agendaSubjects.map(s => {
+              const files = agendaFiles.filter(f => f.subject_id === s.id);
+              const tasks = agendaTasks.filter(t => t.subject_id === s.id);
+              const exams = agendaExams.filter(e => e.subject_id === s.id);
+
+              let storageLabel = '📁 Carpeta Local (PC)';
+              let storageClass = 'storage-pill--local';
+              let storageIcon = 'hardDrive';
+              if (s.storage_type === 'gdrive') {
+                storageLabel = '☁️ Google Drive';
+                storageClass = 'storage-pill--gdrive';
+                storageIcon = 'cloud';
+              } else if (s.storage_type === 'onedrive') {
+                storageLabel = '☁️ OneDrive';
+                storageClass = 'storage-pill--onedrive';
+                storageIcon = 'cloud';
+              }
+
+              return `
+                <div class="neu-card subject-card">
+                  <div class="subject-card__color-bar" style="background:${s.color || '#38bdf8'}"></div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-sm)">
+                      <div>
+                        <h2 style="font-size:1.15rem;font-weight:800;color:var(--text-primary)">${s.name}</h2>
+                        <span class="neu-badge neu-badge--info" style="margin-top:4px">${s.code || 'ASIG'}</span>
+                      </div>
+                      <div style="display:flex;gap:4px">
+                        <button class="neu-btn neu-btn--icon-sm" data-edit-subject="${s.id}" title="Editar Asignatura">
+                          ${icon('edit', { size: 14 })}
+                        </button>
+                        <button class="neu-btn neu-btn--icon-sm" data-delete-subject="${s.id}" title="Eliminar Asignatura">
+                          ${icon('trash', { size: 14 })}
+                        </button>
+                      </div>
+                    </div>
+
+                    ${s.professor ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">👨‍🏫 ${s.professor}</div>` : ''}
+                    ${s.schedule ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:var(--space-md)">🕒 ${s.schedule}</div>` : ''}
+
+                    <!-- Storage Badge -->
+                    <div style="margin-bottom:var(--space-md)">
+                      <span class="storage-pill ${storageClass}">
+                        ${icon(storageIcon, { size: 13 })} ${storageLabel}
+                      </span>
+                      ${s.local_folder_name ? `
+                        <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px">📂 ${s.local_folder_name}</div>
+                      ` : ''}
+                    </div>
+
+                    <!-- Mini Stats -->
+                    <div style="display:flex;gap:12px;font-size:0.8rem;color:var(--text-secondary);margin-bottom:var(--space-lg);background:var(--bg-secondary);padding:var(--space-sm);border-radius:var(--radius-xs);box-shadow:var(--neu-shadow-inset-sm)">
+                      <span>📝 ${tasks.length} deberes</span>
+                      <span>🎯 ${exams.length} exámenes</span>
+                      <span>📑 ${files.length} apuntes</span>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;gap:var(--space-sm);justify-content:space-between;align-items:center;border-top:1px solid var(--border-subtle);padding-top:var(--space-sm)">
+                    ${s.storage_link ? `
+                      <a href="${s.storage_link}" target="_blank" rel="noopener noreferrer" class="neu-btn neu-btn--sm" title="Abrir enlace de nube">
+                        ${icon('externalLink', { size: 14 })} Abrir Nube
+                      </a>
+                    ` : '<span></span>'}
+                    <button class="neu-btn neu-btn--primary" data-open-subject-files="${s.id}">
+                      ${icon('folder', { size: 16 })} Apuntes & Temario
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  // Listeners for tabs
+  container.querySelectorAll('[data-agenda-tab]').forEach(t => {
+    t.addEventListener('click', () => {
+      agendaTab = t.dataset.agendaTab;
+      renderAgendaPage(container);
+    });
+  });
+
+  // Switch to tabs from shortcuts
+  container.querySelectorAll('[data-switch-to]').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      agendaTab = link.dataset.switchTo;
+      renderAgendaPage(container);
+    });
+  });
+
+  // Action buttons
+  document.getElementById('agenda-add-subj-btn')?.addEventListener('click', () => showSubjectModal());
+  document.getElementById('agenda-add-exam-btn')?.addEventListener('click', () => showExamModal());
+  document.getElementById('agenda-add-task-btn')?.addEventListener('click', () => showTaskModal());
+  document.getElementById('exams-tab-add-btn')?.addEventListener('click', () => showExamModal());
+  document.getElementById('tasks-tab-add-btn')?.addEventListener('click', () => showTaskModal());
+
+  // Task filter listeners
+  document.getElementById('tasks-filter-subj')?.addEventListener('change', (e) => {
+    agendaFilterSubject = e.target.value;
+    renderAgendaPage(container);
+  });
+  document.getElementById('tasks-filter-status')?.addEventListener('change', (e) => {
+    agendaFilterStatus = e.target.value;
+    renderAgendaPage(container);
+  });
+
+  // Toggle task complete
+  container.querySelectorAll('[data-toggle-task]').forEach(btn => {
+    btn.addEventListener('click', () => toggleAgendaTaskStatus(btn.dataset.toggleTask));
+  });
+
+  // Edit / Delete Tasks
+  container.querySelectorAll('[data-edit-task]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const task = agendaTasks.find(t => t.id === btn.dataset.editTask);
+      if (task) showTaskModal(task);
+    });
+  });
+  container.querySelectorAll('[data-delete-task]').forEach(btn => {
+    btn.addEventListener('click', () => deleteAgendaTask(btn.dataset.deleteTask));
+  });
+
+  // Edit / Delete Exams
+  container.querySelectorAll('[data-edit-exam]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const exam = agendaExams.find(e => e.id === btn.dataset.editExam);
+      if (exam) showExamModal(exam);
+    });
+  });
+  container.querySelectorAll('[data-delete-exam]').forEach(btn => {
+    btn.addEventListener('click', () => deleteAgendaExam(btn.dataset.deleteExam));
+  });
+
+  // Edit / Delete Subjects
+  container.querySelectorAll('[data-edit-subject]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subj = agendaSubjects.find(s => s.id === btn.dataset.editSubject);
+      if (subj) showSubjectModal(subj);
+    });
+  });
+  container.querySelectorAll('[data-delete-subject]').forEach(btn => {
+    btn.addEventListener('click', () => deleteAgendaSubject(btn.dataset.deleteSubject));
+  });
+
+  // Open Subject Files Hub Modal
+  container.querySelectorAll('[data-open-subject-files]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subj = agendaSubjects.find(s => s.id === btn.dataset.openSubjectFiles);
+      if (subj) showSubjectFilesModal(subj);
+    });
+  });
+}
+
+// ─── TASK ACTIONS ───
+function toggleAgendaTaskStatus(taskId) {
+  const task = agendaTasks.find(t => t.id === taskId);
+  if (!task) return;
+  task.status = task.status === 'completed' ? 'pending' : 'completed';
+  persistAgendaLocal();
+  if (task.status === 'completed') {
+    playBeepChime();
+    showToast('¡Tarea completada con éxito! 🎉', 'success');
+  } else {
+    showToast('Tarea reabierta', 'info');
+  }
+  renderPage();
+}
+
+function deleteAgendaTask(taskId) {
+  if (!confirm('¿Eliminar esta tarea?')) return;
+  agendaTasks = agendaTasks.filter(t => t.id !== taskId);
+  persistAgendaLocal();
+  showToast('Tarea eliminada', 'info');
+  renderPage();
+}
+
+function deleteAgendaExam(examId) {
+  if (!confirm('¿Eliminar este examen de la agenda?')) return;
+  agendaExams = agendaExams.filter(e => e.id !== examId);
+  persistAgendaLocal();
+  showToast('Examen eliminado', 'info');
+  renderPage();
+}
+
+function deleteAgendaSubject(subjectId) {
+  if (!confirm('¿Eliminar esta asignatura y todas sus tareas/exámenes asociados?')) return;
+  agendaSubjects = agendaSubjects.filter(s => s.id !== subjectId);
+  agendaTasks = agendaTasks.filter(t => t.subject_id !== subjectId);
+  agendaExams = agendaExams.filter(e => e.subject_id !== subjectId);
+  agendaFiles = agendaFiles.filter(f => f.subject_id !== subjectId);
+  persistAgendaLocal();
+  showToast('Asignatura eliminada', 'info');
+  renderPage();
+}
+
+// ─── SUBJECT MODAL ───
+function showSubjectModal(editSubject = null) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  const defaultColors = ['#38bdf8', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316'];
+  let selectedColor = editSubject?.color || '#38bdf8';
+  let selectedStorage = editSubject?.storage_type || 'local';
+
+  backdrop.innerHTML = `
+    <div class="modal-content" style="max-width:560px">
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-md);display:flex;align-items:center;gap:8px">
+        ${icon('academic', { size: 22 })} ${editSubject ? 'Editar Asignatura' : 'Nueva Asignatura / Proyecto'}
+      </h2>
+      <form id="subject-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
+        <div class="neu-input-wrapper">
+          <label for="subj-name">Nombre de la Asignatura o Proyecto</label>
+          <input type="text" id="subj-name" class="neu-input" placeholder="Ej: Matemáticas Discretas" required value="${editSubject?.name || ''}" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-sm)">
+          <div class="neu-input-wrapper">
+            <label for="subj-code">Código / Abreviatura</label>
+            <input type="text" id="subj-code" class="neu-input" placeholder="Ej: MAT" value="${editSubject?.code || ''}" />
+          </div>
+          <div class="neu-input-wrapper">
+            <label for="subj-prof">Profesor / Tutor</label>
+            <input type="text" id="subj-prof" class="neu-input" placeholder="Ej: Dra. Ramos" value="${editSubject?.professor || ''}" />
+          </div>
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="subj-sched">Horario / Días de clase</label>
+          <input type="text" id="subj-sched" class="neu-input" placeholder="Ej: Mar & Jue 11:30 - 13:30" value="${editSubject?.schedule || ''}" />
+        </div>
+
+        <!-- Color selector -->
+        <div class="neu-input-wrapper">
+          <label>Color Identificador</label>
+          <div class="note-colors" id="subj-colors">
+            ${defaultColors.map(c => `
+              <div class="note-color-dot ${selectedColor === c ? 'note-color-dot--active' : ''}" style="background:${c}" data-color="${c}"></div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Storage Preference -->
+        <div class="neu-input-wrapper">
+          <label>Almacenamiento de Apuntes Preferido</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-xs);margin-top:4px">
+            <div class="storage-choice-card ${selectedStorage === 'local' ? 'storage-choice-card--active' : ''}" data-storage="local" style="text-align:center;padding:var(--space-sm)">
+              ${icon('hardDrive', { size: 18 })}
+              <div style="font-size:0.75rem;font-weight:700;margin-top:4px">Carpeta PC</div>
+            </div>
+            <div class="storage-choice-card ${selectedStorage === 'gdrive' ? 'storage-choice-card--active' : ''}" data-storage="gdrive" style="text-align:center;padding:var(--space-sm)">
+              ${icon('cloud', { size: 18 })}
+              <div style="font-size:0.75rem;font-weight:700;margin-top:4px">Google Drive</div>
+            </div>
+            <div class="storage-choice-card ${selectedStorage === 'onedrive' ? 'storage-choice-card--active' : ''}" data-storage="onedrive" style="text-align:center;padding:var(--space-sm)">
+              ${icon('cloud', { size: 18 })}
+              <div style="font-size:0.75rem;font-weight:700;margin-top:4px">OneDrive</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="neu-input-wrapper" id="storage-link-box" style="display:${selectedStorage !== 'local' ? 'block' : 'none'}">
+          <label for="subj-link">Enlace a la carpeta compartida en la nube</label>
+          <input type="url" id="subj-link" class="neu-input" placeholder="https://drive.google.com/..." value="${editSubject?.storage_link || ''}" />
+        </div>
+
+        <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
+          <button type="button" class="neu-btn" id="subj-cancel">Cancelar</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editSubject ? 'Guardar Cambios' : 'Crear Asignatura'}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  // Colors
+  backdrop.querySelectorAll('[data-color]').forEach(el => {
+    el.addEventListener('click', () => {
+      backdrop.querySelectorAll('[data-color]').forEach(d => d.classList.remove('note-color-dot--active'));
+      el.classList.add('note-color-dot--active');
+      selectedColor = el.dataset.color;
+    });
+  });
+
+  // Storage choice
+  backdrop.querySelectorAll('[data-storage]').forEach(el => {
+    el.addEventListener('click', () => {
+      backdrop.querySelectorAll('[data-storage]').forEach(s => s.classList.remove('storage-choice-card--active'));
+      el.classList.add('storage-choice-card--active');
+      selectedStorage = el.dataset.storage;
+      const linkBox = document.getElementById('storage-link-box');
+      if (linkBox) linkBox.style.display = selectedStorage !== 'local' ? 'block' : 'none';
+    });
+  });
+
+  document.getElementById('subj-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+
+  document.getElementById('subject-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('subj-name').value.trim();
+    const code = document.getElementById('subj-code').value.trim() || name.substring(0, 3).toUpperCase();
+    const professor = document.getElementById('subj-prof').value.trim();
+    const schedule = document.getElementById('subj-sched').value.trim();
+    const storage_link = document.getElementById('subj-link')?.value?.trim() || '';
+
+    if (!name) return;
+
+    if (editSubject) {
+      const idx = agendaSubjects.findIndex(s => s.id === editSubject.id);
+      if (idx >= 0) {
+        agendaSubjects[idx] = {
+          ...agendaSubjects[idx],
+          name, code, professor, schedule, color: selectedColor,
+          storage_type: selectedStorage,
+          storage_link,
+        };
+      }
+      showToast('Asignatura actualizada', 'success');
+    } else {
+      agendaSubjects.push({
+        id: 'subj_' + Math.random().toString(36).substring(2, 9),
+        name, code, professor, schedule, color: selectedColor,
+        storage_type: selectedStorage,
+        storage_link,
+        local_folder_name: null,
+      });
+      showToast('¡Asignatura añadida! 📚', 'success');
+    }
+
+    persistAgendaLocal();
+    backdrop.remove();
+    renderPage();
+  });
+}
+
+// ─── TASK MODAL ───
+function showTaskModal(editTask = null) {
+  if (agendaSubjects.length === 0) {
+    showToast('Crea primero una asignatura para asociar la tarea', 'info');
+    showSubjectModal();
+    return;
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  backdrop.innerHTML = `
+    <div class="modal-content" style="max-width:540px">
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-md);display:flex;align-items:center;gap:8px">
+        ${icon('check', { size: 22 })} ${editTask ? 'Editar Deberes / Tarea' : 'Nueva Tarea / Entrega'}
+      </h2>
+      <form id="task-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
+        <div class="neu-input-wrapper">
+          <label for="task-title">Título de la tarea o entrega</label>
+          <input type="text" id="task-title" class="neu-input" placeholder="Ej: Práctica 3: Árboles Binarios" required value="${editTask?.title || ''}" />
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="task-subj">Asignatura</label>
+          <select id="task-subj" class="neu-input" style="cursor:pointer" required>
+            ${agendaSubjects.map(s => `
+              <option value="${s.id}" ${editTask?.subject_id === s.id ? 'selected' : ''}>${s.name} (${s.code})</option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-sm)">
+          <div class="neu-input-wrapper">
+            <label for="task-date">Fecha de entrega</label>
+            <input type="date" id="task-date" class="neu-input" required value="${editTask?.due_date || todayStr()}" />
+          </div>
+          <div class="neu-input-wrapper">
+            <label for="task-time">Hora límite</label>
+            <input type="time" id="task-time" class="neu-input" value="${editTask?.due_time || '23:59'}" />
+          </div>
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="task-priority">Prioridad</label>
+          <select id="task-priority" class="neu-input" style="cursor:pointer">
+            <option value="high" ${editTask?.priority === 'high' ? 'selected' : ''}>Alta 🔴</option>
+            <option value="medium" ${editTask?.priority === 'medium' || !editTask ? 'selected' : ''}>Media 🟡</option>
+            <option value="low" ${editTask?.priority === 'low' ? 'selected' : ''}>Baja ⚪</option>
+          </select>
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="task-desc">Detalles o instrucciones adicionales</label>
+          <textarea id="task-desc" class="neu-textarea" placeholder="Formato de entrega, pautas o notas...">${editTask?.description || ''}</textarea>
+        </div>
+
+        <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
+          <button type="button" class="neu-btn" id="task-cancel">Cancelar</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editTask ? 'Guardar Cambios' : 'Añadir a la Agenda'}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.getElementById('task-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+
+  document.getElementById('task-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = document.getElementById('task-title').value.trim();
+    const subject_id = document.getElementById('task-subj').value;
+    const due_date = document.getElementById('task-date').value;
+    const due_time = document.getElementById('task-time').value;
+    const priority = document.getElementById('task-priority').value;
+    const description = document.getElementById('task-desc').value.trim();
+
+    if (!title) return;
+
+    if (editTask) {
+      const idx = agendaTasks.findIndex(t => t.id === editTask.id);
+      if (idx >= 0) {
+        agendaTasks[idx] = {
+          ...agendaTasks[idx],
+          title, subject_id, due_date, due_time, priority, description,
+        };
+      }
+      showToast('Tarea actualizada', 'success');
+    } else {
+      agendaTasks.push({
+        id: 'task_' + Math.random().toString(36).substring(2, 9),
+        title, subject_id, due_date, due_time, priority, description,
+        status: 'pending',
+      });
+      showToast('Tarea registrada en tu agenda 📝', 'success');
+    }
+
+    persistAgendaLocal();
+    backdrop.remove();
+    renderPage();
+  });
+}
+
+// ─── EXAM MODAL ───
+function showExamModal(editExam = null) {
+  if (agendaSubjects.length === 0) {
+    showToast('Crea primero una asignatura para asociar el examen', 'info');
+    showSubjectModal();
+    return;
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  backdrop.innerHTML = `
+    <div class="modal-content" style="max-width:560px">
+      <h2 style="font-size:1.25rem;font-weight:800;margin-bottom:var(--space-md);display:flex;align-items:center;gap:8px">
+        ${icon('timer', { size: 22 })} ${editExam ? 'Editar Examen' : 'Programar Nuevo Examen / Hito'}
+      </h2>
+      <form id="exam-form" style="display:flex;flex-direction:column;gap:var(--space-md)">
+        <div class="neu-input-wrapper">
+          <label for="exam-title">Título o Tipo de Examen</label>
+          <input type="text" id="exam-title" class="neu-input" placeholder="Ej: Examen Parcial Temas 1 a 4" required value="${editExam?.title || ''}" />
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="exam-subj">Asignatura</label>
+          <select id="exam-subj" class="neu-input" style="cursor:pointer" required>
+            ${agendaSubjects.map(s => `
+              <option value="${s.id}" ${editExam?.subject_id === s.id ? 'selected' : ''}>${s.name} (${s.code})</option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-sm)">
+          <div class="neu-input-wrapper">
+            <label for="exam-date">Fecha del examen</label>
+            <input type="date" id="exam-date" class="neu-input" required value="${editExam?.date || todayStr()}" />
+          </div>
+          <div class="neu-input-wrapper">
+            <label for="exam-time">Hora</label>
+            <input type="time" id="exam-time" class="neu-input" value="${editExam?.time || '10:00'}" />
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:var(--space-sm)">
+          <div class="neu-input-wrapper">
+            <label for="exam-loc">Lugar / Aula o Enlace</label>
+            <input type="text" id="exam-loc" class="neu-input" placeholder="Ej: Aula 2.4 - Campus Norte" value="${editExam?.location || ''}" />
+          </div>
+          <div class="neu-input-wrapper">
+            <label for="exam-weight">Ponderación (%)</label>
+            <input type="number" id="exam-weight" class="neu-input" placeholder="40" min="1" max="100" value="${editExam?.weight_percent || ''}" />
+          </div>
+        </div>
+
+        <div class="neu-input-wrapper">
+          <label for="exam-syl">Temario y Contenidos a Evaluar</label>
+          <textarea id="exam-syl" class="neu-textarea" placeholder="Temas, capítulos o fórmulas clave que entran...">${editExam?.syllabus || ''}</textarea>
+        </div>
+
+        <div style="display:flex;gap:var(--space-sm);justify-content:flex-end;margin-top:var(--space-md)">
+          <button type="button" class="neu-btn" id="exam-cancel">Cancelar</button>
+          <button type="submit" class="neu-btn neu-btn--primary">${editExam ? 'Guardar Cambios' : 'Fijar Examen'}</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  document.getElementById('exam-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+
+  document.getElementById('exam-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = document.getElementById('exam-title').value.trim();
+    const subject_id = document.getElementById('exam-subj').value;
+    const date = document.getElementById('exam-date').value;
+    const time = document.getElementById('exam-time').value;
+    const location = document.getElementById('exam-loc').value.trim();
+    const weight_percent = parseInt(document.getElementById('exam-weight').value) || null;
+    const syllabus = document.getElementById('exam-syl').value.trim();
+
+    if (!title || !date) return;
+
+    if (editExam) {
+      const idx = agendaExams.findIndex(x => x.id === editExam.id);
+      if (idx >= 0) {
+        agendaExams[idx] = {
+          ...agendaExams[idx],
+          title, subject_id, date, time, location, weight_percent, syllabus,
+        };
+      }
+      showToast('Examen actualizado', 'success');
+    } else {
+      agendaExams.push({
+        id: 'exam_' + Math.random().toString(36).substring(2, 9),
+        title, subject_id, date, time, location, weight_percent, syllabus,
+        grade: null,
+      });
+      showToast('Examen fijado en tu agenda 🎯', 'success');
+    }
+
+    persistAgendaLocal();
+    backdrop.remove();
+    renderPage();
+  });
+}
+
+// ─── SUBJECT FILES & STORAGE HUB MODAL ───
+function showSubjectFilesModal(subject) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return 'Archivo externo';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const getSubjectFiles = () => agendaFiles.filter(f => f.subject_id === subject.id);
+
+  const renderFilesListHtml = () => {
+    const list = getSubjectFiles();
+    if (list.length === 0) {
+      return `
+        <div class="empty-state" style="padding:var(--space-md)">
+          <div class="empty-state__icon" style="width:40px;height:40px">${icon('folder', { size: 20 })}</div>
+          <div class="empty-state__text" style="font-size:0.9rem">Sin apuntes o temario subido aún</div>
+          <div class="empty-state__hint">Sube archivos PDF/DOC o vincula una carpeta local / nube</div>
+        </div>
+      `;
+    }
+    return list.map(f => `
+      <div class="file-item">
+        <div class="file-item__info">
+          <div class="file-item__icon">
+            ${icon(f.storage_type === 'gdrive' || f.storage_type === 'onedrive' ? 'cloud' : 'file', { size: 18, color: subject.color || '#38bdf8' })}
+          </div>
+          <div>
+            <div class="file-item__name" title="${f.title}">${f.title}</div>
+            <div class="file-item__meta">
+              ${f.storage_type === 'gdrive' ? 'Google Drive' : f.storage_type === 'onedrive' ? 'OneDrive' : 'Local (Navegador)'}
+              • ${formatFileSize(f.file_size)}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px">
+          ${f.url ? `
+            <a href="${f.url}" target="_blank" rel="noopener noreferrer" class="neu-btn neu-btn--icon-sm" title="Abrir enlace">
+              ${icon('externalLink', { size: 14 })}
+            </a>
+          ` : `
+            <button class="neu-btn neu-btn--icon-sm" data-download-file="${f.id}" title="Descargar archivo">
+              ${icon('download', { size: 14 })}
+            </button>
+          `}
+          <button class="neu-btn neu-btn--icon-sm" data-delete-file="${f.id}" title="Quitar">
+            ${icon('trash', { size: 14 })}
+          </button>
+        </div>
+      </div>
+    `).join('');
+  };
+
+  backdrop.innerHTML = `
+    <div class="modal-content" style="max-width:680px">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-md);border-bottom:1px solid var(--border-subtle);padding-bottom:var(--space-sm)">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="subject-tag__dot" style="background:${subject.color || '#38bdf8'};width:14px;height:14px"></span>
+            <h2 style="font-size:1.25rem;font-weight:800;color:var(--text-primary)">
+              ${subject.name}
+            </h2>
+          </div>
+          <p style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">
+            Almacenamiento de apuntes y temario — Sin depender de un servidor central
+          </p>
+        </div>
+        <button class="neu-btn neu-btn--icon-sm" id="files-modal-close" title="Cerrar">
+          ${icon('x', { size: 16 })}
+        </button>
+      </div>
+
+      <!-- Storage Configuration Box -->
+      <div class="neu-card" style="margin-bottom:var(--space-md);padding:var(--space-md);background:var(--bg-secondary);box-shadow:var(--neu-shadow-inset-sm)">
+        <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">
+          Conexión de Almacenamiento
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <span class="storage-pill ${subject.storage_type === 'gdrive' ? 'storage-pill--gdrive' : subject.storage_type === 'onedrive' ? 'storage-pill--onedrive' : 'storage-pill--local'}">
+              ${icon(subject.storage_type === 'local' ? 'hardDrive' : 'cloud', { size: 13 })}
+              ${subject.storage_type === 'gdrive' ? 'Google Drive' : subject.storage_type === 'onedrive' ? 'OneDrive' : 'Carpeta Local en tu PC'}
+            </span>
+            ${subject.local_folder_name ? `
+              <div style="font-size:0.75rem;color:var(--text-primary);margin-top:4px">📂 Carpeta vinculada: <strong>${subject.local_folder_name}</strong></div>
+            ` : ''}
+          </div>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="neu-btn neu-btn--sm" id="pick-local-dir-btn">
+              ${icon('hardDrive', { size: 14 })} Seleccionar Carpeta en PC
+            </button>
+            ${subject.storage_link ? `
+              <a href="${subject.storage_link}" target="_blank" rel="noopener noreferrer" class="neu-btn neu-btn--sm" style="display:inline-flex;align-items:center;gap:4px">
+                ${icon('externalLink', { size: 14 })} Abrir en Nube
+              </a>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- Upload or Add File Section -->
+      <div style="display:flex;gap:var(--space-sm);align-items:center;margin-bottom:var(--space-md);flex-wrap:wrap">
+        <label class="neu-btn neu-btn--primary neu-btn--sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          ${icon('upload', { size: 15 })} Subir Apunte / PDF local
+          <input type="file" id="local-file-uploader" style="display:none" multiple accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.png,.jpg,.jpeg,.zip" />
+        </label>
+        <button type="button" class="neu-btn neu-btn--sm" id="add-cloud-link-btn">
+          ${icon('cloud', { size: 15 })} Vincular Enlace (Drive / OneDrive)
+        </button>
+      </div>
+
+      <!-- Cloud Link Form (Hidden by default) -->
+      <div id="cloud-link-form" style="display:none;margin-bottom:var(--space-md);padding:var(--space-sm);background:var(--bg-card);border-radius:var(--radius-xs);border:1px solid var(--border-subtle)">
+        <div style="display:flex;gap:var(--space-xs);align-items:center">
+          <input type="text" id="cloud-doc-title" class="neu-input" placeholder="Nombre (ej: Temario Completo Drive)" style="flex:1" />
+          <input type="url" id="cloud-doc-url" class="neu-input" placeholder="https://drive.google.com/..." style="flex:1.5" />
+          <button type="button" class="neu-btn neu-btn--sm neu-btn--primary" id="save-cloud-link-btn">Guardar</button>
+        </div>
+      </div>
+
+      <!-- Files List -->
+      <div style="font-size:0.8rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">
+        Documentos & Temario de esta asignatura
+      </div>
+      <div class="file-list" id="subject-files-container">
+        ${renderFilesListHtml()}
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  // Close
+  document.getElementById('files-modal-close').addEventListener('click', () => backdrop.remove());
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+
+  const rebindFileActions = () => {
+    const listEl = document.getElementById('subject-files-container');
+    if (!listEl) return;
+    listEl.innerHTML = renderFilesListHtml();
+
+    // Download / view file
+    listEl.querySelectorAll('[data-download-file]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const fileObj = agendaFiles.find(f => f.id === btn.dataset.downloadFile);
+        if (fileObj) {
+          try {
+            await downloadLocalFile(fileObj);
+          } catch (e) {
+            showToast('No se pudo descargar el archivo local', 'error');
+          }
+        }
+      });
+    });
+
+    // Delete file
+    listEl.querySelectorAll('[data-delete-file]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const fId = btn.dataset.deleteFile;
+        await removeLocalFile(fId);
+        agendaFiles = agendaFiles.filter(f => f.id !== fId);
+        persistAgendaLocal();
+        showToast('Documento eliminado', 'info');
+        rebindFileActions();
+      });
+    });
+  };
+
+  rebindFileActions();
+
+  // Local file uploader (stores in browser IndexedDB without server dependency)
+  document.getElementById('local-file-uploader')?.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    for (const f of files) {
+      const fileRecord = {
+        id: 'file_' + Math.random().toString(36).substring(2, 9),
+        subject_id: subject.id,
+        name: f.name,
+        title: f.name,
+        storage_type: 'local',
+        file_size: f.size,
+        created_at: new Date().toISOString(),
+      };
+      await storeLocalFile(fileRecord, f);
+      agendaFiles.push(fileRecord);
+    }
+
+    persistAgendaLocal();
+    showToast(`¡${files.length} archivo(s) guardado(s) localmente! 📁`, 'success');
+    rebindFileActions();
+  });
+
+  // Pick User Local Directory from PC (File System Access API)
+  document.getElementById('pick-local-dir-btn')?.addEventListener('click', async () => {
+    const res = await pickUserLocalDirectory();
+    if (res && res.directoryName) {
+      subject.local_folder_name = res.directoryName;
+      subject.storage_type = 'local';
+      // If files were detected in the directory, import references
+      if (res.files && res.files.length > 0) {
+        for (const f of res.files) {
+          if (!agendaFiles.some(existing => existing.subject_id === subject.id && existing.title === f.name)) {
+            agendaFiles.push({
+              id: 'file_' + Math.random().toString(36).substring(2, 9),
+              subject_id: subject.id,
+              name: f.name,
+              title: f.name,
+              storage_type: 'local',
+              file_size: f.size,
+              created_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+      persistAgendaLocal();
+      showToast(`Carpeta "${res.directoryName}" vinculada con éxito 💻`, 'success');
+      backdrop.remove();
+      renderPage();
+    } else if (res && !res.supported) {
+      showToast('Tu navegador no soporta el explorador de carpetas nativo. Usa la subida de archivos.', 'info');
+    }
+  });
+
+  // Toggle cloud link form
+  const cloudForm = document.getElementById('cloud-link-form');
+  document.getElementById('add-cloud-link-btn')?.addEventListener('click', () => {
+    cloudForm.style.display = cloudForm.style.display === 'none' ? 'block' : 'none';
+  });
+
+  // Save cloud link
+  document.getElementById('save-cloud-link-btn')?.addEventListener('click', () => {
+    const title = document.getElementById('cloud-doc-title').value.trim();
+    const url = document.getElementById('cloud-doc-url').value.trim();
+    if (!title || !url) {
+      showToast('Completa el título y la URL del documento', 'error');
+      return;
+    }
+
+    const isDrive = url.includes('drive.google.com');
+    const isOneDrive = url.includes('onedrive') || url.includes('sharepoint');
+
+    agendaFiles.push({
+      id: 'file_' + Math.random().toString(36).substring(2, 9),
+      subject_id: subject.id,
+      name: title,
+      title: title,
+      storage_type: isDrive ? 'gdrive' : isOneDrive ? 'onedrive' : 'url',
+      file_size: 0,
+      url: url,
+      created_at: new Date().toISOString(),
+    });
+
+    persistAgendaLocal();
+    showToast('Enlace de temario añadido ☁️', 'success');
+    cloudForm.style.display = 'none';
+    rebindFileActions();
   });
 }
 
